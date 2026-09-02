@@ -46,7 +46,6 @@ const statsSummary = document.getElementById('stats-summary') as HTMLDivElement;
 const statsChart = document.getElementById('stats-chart') as HTMLDivElement;
 
 // --- Data ---
-const exportCsvBtn = document.getElementById('export-csv-btn') as HTMLButtonElement;
 const openDataDirBtn = document.getElementById('open-data-dir-btn') as HTMLButtonElement;
 const resetAllBtn = document.getElementById('reset-all-btn') as HTMLButtonElement;
 const dataStatus = document.getElementById('data-status') as HTMLDivElement;
@@ -277,18 +276,6 @@ async function loadStats() {
 }
 
 // --- Data ---
-exportCsvBtn.addEventListener('click', async () => {
-  try {
-    const result = await invoke<{ path: string }>('export_csv');
-    const name = result.path.split(/[\\/]/).pop() ?? result.path;
-    dataStatus.textContent = `Exported ${name}`;
-    dataStatus.title = result.path;
-  } catch (err) {
-    console.error('export_csv failed', err);
-    dataStatus.textContent = 'Export failed.';
-  }
-});
-
 openDataDirBtn.addEventListener('click', () => {
   invoke('open_data_dir').catch((err) => console.error('open_data_dir failed', err));
 });

@@ -544,13 +544,6 @@ impl Store {
     pub fn truncate_history(&self) -> std::io::Result<()> {
         fs::write(self.history_path(), b"")
     }
-
-    /// `<data dir>/export`, created on demand.
-    pub fn export_dir(&self) -> std::io::Result<PathBuf> {
-        let dir = self.dir.join("export");
-        fs::create_dir_all(&dir)?;
-        Ok(dir)
-    }
 }
 
 fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> std::io::Result<Option<T>> {

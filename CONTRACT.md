@@ -250,11 +250,10 @@ interface Stats {
 | Command         | Args | Returns              | Notes |
 |-----------------|------|----------------------|-------|
 | `get_stats`     | –    | `Stats`              | |
-| `export_csv`    | –    | `{ path: string }`   | Writes `%APPDATA%/dev.kutimskii.tide/export/tide-history-YYYYMMDD-HHMMSS.csv` with header `ts_iso,type,source,minutes` and reveals it in Explorer (`explorer /select,<path>`). |
 | `open_data_dir` | –    | `void`               | Opens the data folder in Explorer. |
 | `reset_all`     | –    | `Tick`               | Deletes history, resets state (count, streak, timer full), keeps settings. UI must confirm first (native `confirm()` is fine). |
 
-Settings page gets a **Data** group: Export CSV, Open data folder, Reset all (danger). Footer keeps Reset today + Quit.
+Settings page gets a **Data** group: Open data folder, Reset all (danger). (CSV export was removed after release: Explorer reveal was unreliable and the feature had no real use.) Footer keeps Reset today + Quit.
 
 ## History (extended)
 

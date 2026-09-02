@@ -46,7 +46,6 @@ Everything lives in the Tauri `app_config_dir`, which on Windows is
 | `settings.json` | MVP fields, the v0.2 ones (active/quiet hours, dailyGoal, alwaysOnTop, clickThrough, autostart, hotkey*, toastEnabled, nudge*, sound*) and the v0.3 Look ones (`layout`, `scale`, `colorPreset`, `reducedMotion`) |
 | `state.json`    | `{ version, lastDrinkTs, todayCount, dayKey, position, pausedAccumMs, pausedSince, snoozeMs, lastMode, streak, bestStreak }` |
 | `history.jsonl` | one `{ ts, type: drink|snooze|pause|resume|reset, source, minutes? }` per line |
-| `export/`       | CSV exports written by the `export_csv` command, one file per export: `tide-history-YYYYMMDD-HHMMSS.csv` |
 
 Files written by the MVP still load: every v0.2 and v0.3 field has a serde
 default. `STATE_VERSION` is **2** since v0.3; a state file still at version 1
@@ -162,7 +161,6 @@ click-through is on takes effect immediately.
 | Command | Returns | Notes |
 |---|---|---|
 | `get_stats` | `Stats` | 14 days, oldest first, empty days zeroed. `avgGapMin` is `null` below two drinks that day; `longestOverdueMin` is `max(0, gap − interval)` over that day's gaps only, so the overnight span never counts. `totalDrinks` spans the whole file, not the window. |
-| `export_csv` | `{ path }` | Writes `%APPDATA%\dev.kutimskii.tide\export\tide-history-YYYYMMDD-HHMMSS.csv`, header `ts_iso,type,source,minutes`, timestamps ISO 8601 local with the UTC offset, `minutes` empty for non-snooze rows. Then runs `explorer /select,<path>`; a failure there is logged and ignored, the path is still returned. |
 | `open_data_dir` | – | `explorer <data dir>`; best effort. |
 | `reset_all` | `Tick` | Truncates `history.jsonl` and appends one `{"type":"reset","source":"ui"}` line so the file is never empty; `todayCount` and `streak` go to 0, the timer goes back to full, the nudge schedule is cleared. `bestStreak`, settings and the widget position survive. The UI confirms first. |
 

@@ -8,12 +8,10 @@ pub mod platform;
 pub mod stats;
 pub mod store;
 
-use std::io::Write;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use chrono::{Local, TimeZone};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{
@@ -309,39 +307,21 @@ fn get_stats(state: SharedState<'_>) -> Stats {
     lock(&state).compute_stats(now_ms())
 }
 
-/// Path returned by `export_csv`.
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct ExportResult {
-    pub path: String,
-}
-
-#[tauri::command]
-fn export_csv(state: SharedState<'_>) -> Result<ExportResult, String> {
-    let (dir, entries) = {
-        let guard = lock(&state);
-        let dir = guard.store.export_dir().map_err(|e| e.to_string())?;
-        (dir, guard.store.load_history())
-    };
-    let name = format!("tide-history-{}.csv", Local::now().format("%Y%m%d-%H%M%S"));
-    let path = dir.join(name);
-    write_history_csv(&path, &entries).map_err(|e| e.to_string())?;
-    log::info!(
-        "exported {} history entries to {}",
-        entries.len(),
-        path.display()
-    );
-    reveal_in_explorer(&path);
-    Ok(ExportResult {
-        path: path.to_string_lossy().into_owned(),
-    })
-}
-
 #[tauri::command]
 fn open_data_dir(state: SharedState<'_>) -> Result<(), String> {
     let dir = lock(&state).store.dir().to_path_buf();
     // Best effort: a missing file manager must not fail the command loudly.
-    if let Err(err) = tauri_plugin_opener::open_path(&dir, None::<&str>) {
-        log::warn!("could not open {}: {err}", dir.display());
+    let target = shell_path(&dir);
+    let mut cmd = std::process::Command::new("explorer.exe");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.raw_arg(format!("\"{target}\""));
+    }
+    #[cfg(not(windows))]
+    cmd.arg(&target);
+    if let Err(err) = cmd.spawn() {
+        log::warn!("could not open {target}: {err}");
     }
     Ok(())
 }
@@ -373,48 +353,17 @@ fn reset_all(app: AppHandle, state: SharedState<'_>) -> Tick {
     tick
 }
 
-/// `ts_iso,type,source,minutes`, ISO 8601 local time with the UTC offset.
-fn write_history_csv(path: &std::path::Path, entries: &[HistoryEntry]) -> std::io::Result<()> {
-    let file = std::fs::File::create(path)?;
-    let mut writer = std::io::BufWriter::new(file);
-    writeln!(writer, "ts_iso,type,source,minutes")?;
-    for entry in entries {
-        writeln!(
-            writer,
-            "{},{},{},{}",
-            csv_field(&iso_local(entry.ts)),
-            csv_field(&entry.kind),
-            csv_field(&entry.source),
-            entry.minutes.map(|m| m.to_string()).unwrap_or_default(),
-        )?;
-    }
-    writer.flush()
-}
-
-/// ISO 8601 in the machine's local zone, offset included (`2026-09-02T13:45:00+03:00`).
-fn iso_local(ts_ms: i64) -> String {
-    match Local.timestamp_millis_opt(ts_ms).single() {
-        Some(dt) => dt.format("%Y-%m-%dT%H:%M:%S%:z").to_string(),
-        None => String::new(),
-    }
-}
-
-/// Minimal RFC 4180 quoting; history values are tame, but a hand-edited file
-/// must not be able to produce a broken CSV.
-fn csv_field(value: &str) -> String {
-    if value.contains([',', '"', '\n', '\r']) {
-        format!("\"{}\"", value.replace('"', "\"\""))
+/// Path form that Explorer accepts.
+/// Explorer refuses verbatim (`\\?\`) paths with "Location is not available",
+/// and canonicalised paths on Windows carry that prefix; strip it.
+fn shell_path(path: &std::path::Path) -> String {
+    let s = path.to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else if let Some(rest) = s.strip_prefix(r"\\?\") {
+        rest.to_string()
     } else {
-        value.to_string()
-    }
-}
-
-/// Select the freshly written file in Explorer. Non-fatal by design.
-fn reveal_in_explorer(path: &std::path::Path) {
-    // SHOpenFolderAndSelectItems via the opener plugin; a hand-rolled
-    // `explorer /select,<path>` misparses the argument and shows an error.
-    if let Err(err) = tauri_plugin_opener::reveal_item_in_dir(path) {
-        log::warn!("could not reveal {} in Explorer: {err}", path.display());
+        s.into_owned()
     }
 }
 
@@ -1168,7 +1117,6 @@ pub fn run() {
             focus_widget(app);
         }))
         .plugin(tauri_plugin_notification::init())
-        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -1185,7 +1133,6 @@ pub fn run() {
             open_settings,
             save_position,
             get_stats,
-            export_csv,
             open_data_dir,
             reset_all,
             quit
@@ -1380,20 +1327,5 @@ mod tests {
         // Past the right edge: pulled back to 1920 + 1280 - 35.
         assert_eq!(clamp_rect_into(right, (3300, 200), (35, 275)), (3165, 200));
         assert_eq!(clamp_rect_into(right, (3100, 950), (35, 275)), (3100, 725));
-    }
-
-    #[test]
-    fn csv_quoting_and_local_iso() {
-        assert_eq!(csv_field("drink"), "drink");
-        assert_eq!(csv_field("a,b"), "\"a,b\"");
-        assert_eq!(csv_field("say \"hi\""), "\"say \"\"hi\"\"\"");
-        assert_eq!(csv_field("two\nlines"), "\"two\nlines\"");
-
-        // ISO 8601 with an explicit offset, e.g. 2026-09-02T13:45:00+03:00.
-        let iso = iso_local(1_800_000_000_000);
-        assert_eq!(iso.len(), 25);
-        assert_eq!(&iso[4..5], "-");
-        assert_eq!(&iso[10..11], "T");
-        assert!(iso[19..].starts_with('+') || iso[19..].starts_with('-'));
     }
 }
