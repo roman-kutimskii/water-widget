@@ -168,3 +168,11 @@ click-through is on takes effect immediately.
 
 Malformed lines in `history.jsonl` are skipped with a warning rather than
 failing a stats call or an export.
+
+## Release build
+
+```
+npm run tauri build
+```
+
+Produces `src-tauri/target/release/bundle/nsis/Tide_<version>_x64-setup.exe` (per-user NSIS installer, no admin needed; `/S` for silent). It installs to `%LOCALAPPDATA%\Tide\tide.exe`. Autostart re-registers on every launch when the setting is on, so the Run key always follows the executable that is actually running (dev build vs. installed).

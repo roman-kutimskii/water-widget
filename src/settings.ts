@@ -280,7 +280,9 @@ async function loadStats() {
 exportCsvBtn.addEventListener('click', async () => {
   try {
     const result = await invoke<{ path: string }>('export_csv');
-    dataStatus.textContent = `Exported to ${result.path}`;
+    const name = result.path.split(/[\\/]/).pop() ?? result.path;
+    dataStatus.textContent = `Exported ${name}`;
+    dataStatus.title = result.path;
   } catch (err) {
     console.error('export_csv failed', err);
     dataStatus.textContent = 'Export failed.';
@@ -291,8 +293,26 @@ openDataDirBtn.addEventListener('click', () => {
   invoke('open_data_dir').catch((err) => console.error('open_data_dir failed', err));
 });
 
+// Two-step confirmation inside the page (the browser confirm() shows an ugly
+// "localhost says" dialog). First click arms the button for 4 s.
+let resetArmTimer: number | undefined;
+function disarmResetAll() {
+  resetAllBtn.textContent = 'Reset all';
+  resetAllBtn.classList.remove('armed');
+  if (resetArmTimer !== undefined) {
+    window.clearTimeout(resetArmTimer);
+    resetArmTimer = undefined;
+  }
+}
+
 resetAllBtn.addEventListener('click', async () => {
-  if (!confirm('Delete all history and reset streaks?')) return;
+  if (!resetAllBtn.classList.contains('armed')) {
+    resetAllBtn.classList.add('armed');
+    resetAllBtn.textContent = 'Click again to delete all history';
+    resetArmTimer = window.setTimeout(disarmResetAll, 4000);
+    return;
+  }
+  disarmResetAll();
   try {
     await invoke<Tick>('reset_all');
     dataStatus.textContent = 'All history and streaks have been reset.';

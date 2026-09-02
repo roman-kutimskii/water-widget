@@ -123,7 +123,7 @@ UI reaction: 300 ms wobble animation on the widget; if `soundEnabled`, play the 
 | `snooze`       | `{ minutes: number }`      | `Tick`  | 1..60, clamped. Appends history `{type:'snooze', minutes}`. |
 | `set_paused`   | `{ paused: boolean }`      | `Tick`  | Idempotent. History `pause` / `resume`. |
 | `drink`        | unchanged; `source` may now also be `'hotkey'` or `'toast'`. |
-| `reset_today`  | –                          | `Tick`  | `todayCount = 0`. |
+| `reset_today`  | –                          | `Tick`  | `todayCount = 0` and the bar refills (fresh timer, snooze cleared, nudges reset). |
 
 ## Settings (extended)
 

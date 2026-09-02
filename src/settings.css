@@ -228,6 +228,15 @@ select {
   opacity: 0.6;
 }
 
+button.danger.armed {
+  background: #b91c1c;
+  border-color: #b91c1c;
+  color: #fff;
+}
+
 #data-status {
   min-height: 14px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }

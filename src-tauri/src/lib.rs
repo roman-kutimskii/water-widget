@@ -290,6 +290,9 @@ fn reset_today(app: AppHandle, state: SharedState<'_>) -> Tick {
     let tick = {
         let mut guard = lock(&state);
         guard.state.today_count = 0;
+        // "Reset" also refills the bar: fresh timer, no snooze, no pending nudges.
+        guard.timer.reset_session(now);
+        guard.nudge = NudgeState::default();
         guard.persist_state();
         guard.log_history(&HistoryEntry::reset(now, "ui"));
         guard.tick(now)
@@ -844,7 +847,10 @@ fn apply_autostart(app: &AppHandle, enabled: bool) {
 
     let manager = app.autolaunch();
     let current = manager.is_enabled().unwrap_or(false);
-    if current == enabled {
+    // When enabled, always re-register: the Run entry stores the executable
+    // path, and it must follow the binary that is actually running (e.g. after
+    // moving from a dev build to the installed release).
+    if !enabled && !current {
         return;
     }
     let result = if enabled {
