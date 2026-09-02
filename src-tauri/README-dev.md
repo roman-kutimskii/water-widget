@@ -177,8 +177,9 @@ npm run release:install   # build it, then launch it (quit Tide from the tray fi
 `scripts/release.mjs` wraps `tauri build`, which always runs `npm run build`
 first (`beforeBuildCommand`), so `dist/` is regenerated from `src/` on every
 release — an installer can never ship a stale frontend bundle. The script then
-prints the path of the newest installer it produced. Both need `cargo` on
-`PATH`; a shell opened before rustup was installed will not have it.
+prints the path of the newest installer it produced. If `cargo` is missing from
+`PATH` (a shell opened before rustup was installed), the script falls back to
+`%CARGO_HOME%in` / `~/.cargo/bin` rather than failing the Rust build.
 
 If the Rust build fails with `failed to read plugin permissions` pointing at a
 directory that is not this checkout, the target dir is a cache from an older
