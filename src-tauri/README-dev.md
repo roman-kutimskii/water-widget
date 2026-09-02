@@ -170,7 +170,18 @@ failing a stats call or an export.
 ## Release build
 
 ```
-npm run tauri build
+npm run release           # build the installer
+npm run release:install   # build it, then launch it (quit Tide from the tray first)
 ```
 
-Produces `src-tauri/target/release/bundle/nsis/Tide_<version>_x64-setup.exe` (per-user NSIS installer, no admin needed; `/S` for silent). It installs to `%LOCALAPPDATA%\Tide\tide.exe`. Autostart re-registers on every launch when the setting is on, so the Run key always follows the executable that is actually running (dev build vs. installed).
+`scripts/release.mjs` wraps `tauri build`, which always runs `npm run build`
+first (`beforeBuildCommand`), so `dist/` is regenerated from `src/` on every
+release — an installer can never ship a stale frontend bundle. The script then
+prints the path of the newest installer it produced. Both need `cargo` on
+`PATH`; a shell opened before rustup was installed will not have it.
+
+If the Rust build fails with `failed to read plugin permissions` pointing at a
+directory that is not this checkout, the target dir is a cache from an older
+location — `cargo clean --manifest-path src-tauri/Cargo.toml` and rebuild.
+
+`npm run tauri build` still works and produces `src-tauri/target/release/bundle/nsis/Tide_<version>_x64-setup.exe` (per-user NSIS installer, no admin needed; `/S` for silent). It installs to `%LOCALAPPDATA%\Tide\tide.exe`. Autostart re-registers on every launch when the setting is on, so the Run key always follows the executable that is actually running (dev build vs. installed).
