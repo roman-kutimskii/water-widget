@@ -9,8 +9,6 @@ import type { Tick, Settings, Nudge } from './types';
 const pillEl = document.getElementById('pill') as HTMLDivElement;
 const fillEl = document.getElementById('fill') as HTMLDivElement;
 const textEl = document.getElementById('text') as HTMLDivElement;
-const btnDrink = document.getElementById('btn-drink') as HTMLButtonElement;
-const btnPause = document.getElementById('btn-pause') as HTMLButtonElement;
 const htmlEl = document.documentElement;
 
 let currentTick: Tick | null = null;
@@ -79,7 +77,7 @@ function render() {
   if (showText) {
     let label: string;
     if (tick.mode === 'paused') {
-      label = '⏸ Paused';
+      label = 'Paused';
     } else if (tick.mode === 'sleeping') {
       label = 'zzz';
     } else {
@@ -93,9 +91,6 @@ function render() {
   } else {
     textEl.classList.add('hidden');
   }
-
-  btnPause.textContent = tick.mode === 'paused' ? '▶' : '⏸';
-  btnPause.title = tick.mode === 'paused' ? 'Resume' : 'Pause';
 
   pillEl.title = tooltipFor(tick, settings);
 }
@@ -232,19 +227,6 @@ function playSplash() {
     fillEl.classList.remove('splash');
   }, 300);
 }
-
-// --- Hover mini-buttons: must stop propagation so they never trigger drag/click. ---
-btnDrink.addEventListener('mousedown', (e) => e.stopPropagation());
-btnDrink.addEventListener('click', (e) => {
-  e.stopPropagation();
-  onDrink();
-});
-
-btnPause.addEventListener('mousedown', (e) => e.stopPropagation());
-btnPause.addEventListener('click', (e) => {
-  e.stopPropagation();
-  onTogglePause();
-});
 
 // Right click and double click both open settings.
 pillEl.addEventListener('contextmenu', (e) => {

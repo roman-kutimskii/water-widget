@@ -175,8 +175,8 @@ Title "Tide", body "Time for water" (overdue) / "Welcome back — drink now?" (w
 | quiet      | whole pill at 40 % of configured opacity |
 | snoozed    | no special look; the fill simply jumps up |
 | nudge      | 300 ms horizontal wobble (±3 px, 3 cycles) |
-| hover      | ✓ (drink) and ⏸/▶ (pause toggle) mini-buttons fade in at the right edge; click on them must NOT count as a bar click |
-| clickThrough | 20 px grip zone with ⋮⋮ glyph at right edge; hover buttons disabled |
+| hover      | no mini-buttons (removed: the whole bar is the drink target; pause lives in the tray menu and on the P key) |
+| clickThrough | 20 px grip zone with ⋮⋮ glyph at right edge |
 
 Right-click still opens Settings (no custom context menu in v0.2).
 

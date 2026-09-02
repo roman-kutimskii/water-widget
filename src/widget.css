@@ -181,78 +181,6 @@ html.rm-on .pill.wobble {
   animation: none;
 }
 
-/* --- hover mini buttons --- */
-
-.hover-controls {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 2;
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  padding: 0 5px;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.15s ease;
-}
-
-/* Make room for the buttons so the label never sits underneath them. */
-.text {
-  transition: padding-right 0.15s ease;
-}
-.pill:hover:not(.click-through) .text {
-  padding-right: 3.6em;
-}
-
-.pill:hover .hover-controls {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.pill.click-through .hover-controls {
-  display: none;
-}
-
-.mini-btn {
-  width: 1.5em;
-  height: 1.5em;
-  padding: 0;
-  border: none;
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.38);
-  color: #ffffff;
-  /* Segoe UI Symbol keeps ✓ ⏸ ▶ as flat glyphs instead of colour emoji. */
-  font-family: 'Segoe UI Symbol', 'Segoe UI', sans-serif;
-  font-size: 0.85em;
-  line-height: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
-  transition: background-color 0.12s ease, transform 0.12s ease;
-}
-
-.mini-btn:hover {
-  background: rgba(0, 0, 0, 0.6);
-  transform: scale(1.08);
-}
-
-.mini-btn:active {
-  transform: scale(0.95);
-}
-
-@media (prefers-color-scheme: light) {
-  .mini-btn {
-    background: rgba(0, 0, 0, 0.45);
-  }
-  .mini-btn:hover {
-    background: rgba(0, 0, 0, 0.65);
-  }
-}
-
 /* --- click-through grip --- */
 
 .grip {
@@ -309,16 +237,6 @@ html.layout-vertical .text {
   align-items: center;
 }
 
-html.layout-vertical .hover-controls {
-  top: auto;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  flex-direction: column;
-  padding: 4px 0;
-  background: linear-gradient(to bottom, transparent, rgba(0, 0, 0, 0.35) 30%);
-}
-
 html.layout-vertical .grip {
   top: auto;
   bottom: 0;
@@ -348,7 +266,6 @@ html.layout-compact .pill {
 }
 
 html.layout-compact .pill .text,
-html.layout-compact .pill .hover-controls,
 html.layout-compact .pill .grip {
   opacity: 0;
   transition: opacity 0.1s ease;
@@ -359,8 +276,7 @@ html.layout-compact .pill.expanded {
   height: 100%;
 }
 
-html.layout-compact .pill.expanded .text,
-html.layout-compact .pill.expanded .hover-controls {
+html.layout-compact .pill.expanded .text {
   opacity: 1;
   pointer-events: auto;
 }
