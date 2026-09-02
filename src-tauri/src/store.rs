@@ -348,6 +348,10 @@ pub struct PersistedState {
     pub paused_since: Option<i64>,
     #[serde(default)]
     pub snooze_ms: i64,
+    /// Timestamp of the last drink that incremented `today_count` (0 = none);
+    /// the double-click merge window is measured from here.
+    #[serde(default)]
+    pub last_counted_ts: i64,
     #[serde(default = "default_last_mode")]
     pub last_mode: String,
     // --- v0.3. A file written before `STATE_VERSION` 2 has no streak data, so
@@ -379,6 +383,7 @@ impl PersistedState {
             paused_accum_ms: 0,
             paused_since: None,
             snooze_ms: 0,
+            last_counted_ts: 0,
             last_mode: default_last_mode(),
             streak: 0,
             best_streak: 0,

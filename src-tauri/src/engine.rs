@@ -7,7 +7,10 @@ use serde::{Deserialize, Serialize};
 pub const DAY_ROLLOVER_HOURS: i64 = 4;
 
 /// Two drinks logged within this window count as one.
-pub const DRINK_MERGE_WINDOW_MS: i64 = 60_000;
+/// Clicks this close to the last *counted* drink refill the bar but don't add
+/// to the count (double-click protection). Anchored to the counted drink, not
+/// the last click, so steady clicking can't suppress counting forever.
+pub const DRINK_MERGE_WINDOW_MS: i64 = 10_000;
 
 pub const MINUTE_MS: i64 = 60_000;
 
@@ -547,11 +550,13 @@ mod tests {
 
     #[test]
     fn merge_window() {
-        assert!(should_merge_drink(NOW + 10_000, NOW));
+        assert!(should_merge_drink(NOW + 5_000, NOW));
         assert!(should_merge_drink(NOW, NOW));
-        assert!(should_merge_drink(NOW + 59_999, NOW));
-        assert!(!should_merge_drink(NOW + 60_000, NOW));
+        assert!(should_merge_drink(NOW + 9_999, NOW));
+        assert!(!should_merge_drink(NOW + 10_000, NOW));
         assert!(!should_merge_drink(NOW + 10 * MIN, NOW));
+        // Never merge against "no counted drink yet" (e.g. right after a reset).
+        assert!(!should_merge_drink(NOW, 0));
         // Clock jumped backwards: do not merge, treat as a fresh drink.
         assert!(!should_merge_drink(NOW - 1, NOW));
     }

@@ -32,7 +32,7 @@ Payload: `Settings` (below). Both windows receive it.
 
 | Command          | Args                          | Returns     | Notes |
 |------------------|-------------------------------|-------------|-------|
-| `drink`          | `{ source: 'click'\|'hotkey'\|'toast' }` | `Tick`      | Resets `lastDrinkTs = now`, `todayCount += 1`. Events within 60 s of the previous drink are merged: state updates but count does not increment. Appends to history. Emits `tick`. |
+| `drink`          | `{ source: 'click'\|'hotkey'\|'toast' }` | `Tick`      | Resets `lastDrinkTs = now`, `todayCount += 1`. Events within 10 s of the previous *counted* drink are merged: state updates but count does not increment (double-click protection; measured from the last counted drink, never from a reset, so steady clicking still counts). Appends to history. Emits `tick`. |
 | `get_tick`       | –                             | `Tick`      | Current computed tick (for initial render). |
 | `get_settings`   | –                             | `Settings`  | |
 | `set_settings`   | `{ settings: Settings }`      | `Settings`  | Validates + clamps, persists, emits `settings-changed` and `tick`. |

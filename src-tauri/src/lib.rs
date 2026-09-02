@@ -158,8 +158,10 @@ impl AppState {
     fn record_drink(&mut self, now: i64, source: &str) -> Tick {
         self.apply_day_rollover(now);
         // Repeated clicks inside the merge window refill the bar but count once.
-        if !should_merge_drink(now, self.timer.last_drink_ts) {
+        // Measured from the last *counted* drink so steady clicking still counts.
+        if !should_merge_drink(now, self.state.last_counted_ts) {
             self.state.today_count = self.state.today_count.saturating_add(1);
+            self.state.last_counted_ts = now;
         }
         self.timer.drink(now);
         self.nudge.reset();
@@ -290,6 +292,7 @@ fn reset_today(app: AppHandle, state: SharedState<'_>) -> Tick {
     let tick = {
         let mut guard = lock(&state);
         guard.state.today_count = 0;
+        guard.state.last_counted_ts = 0; // the next drink must count
         // "Reset" also refills the bar: fresh timer, no snooze, no pending nudges.
         guard.timer.reset_session(now);
         guard.nudge = NudgeState::default();
@@ -337,7 +340,7 @@ fn export_csv(state: SharedState<'_>) -> Result<ExportResult, String> {
 fn open_data_dir(state: SharedState<'_>) -> Result<(), String> {
     let dir = lock(&state).store.dir().to_path_buf();
     // Best effort: a missing file manager must not fail the command loudly.
-    if let Err(err) = std::process::Command::new("explorer").arg(&dir).spawn() {
+    if let Err(err) = tauri_plugin_opener::open_path(&dir, None::<&str>) {
         log::warn!("could not open {}: {err}", dir.display());
     }
     Ok(())
@@ -357,6 +360,7 @@ fn reset_all(app: AppHandle, state: SharedState<'_>) -> Tick {
         guard.log_history(&HistoryEntry::reset(now, "ui"));
 
         guard.state.today_count = 0;
+        guard.state.last_counted_ts = 0;
         guard.state.day_key = day_key_local(now);
         guard.state.streak = 0; // bestStreak is a record; it survives.
         guard.timer.reset_session(now);
@@ -407,9 +411,9 @@ fn csv_field(value: &str) -> String {
 
 /// Select the freshly written file in Explorer. Non-fatal by design.
 fn reveal_in_explorer(path: &std::path::Path) {
-    // `/select,<path>` has to stay a single argument.
-    let arg = format!("/select,{}", path.display());
-    if let Err(err) = std::process::Command::new("explorer").arg(arg).spawn() {
+    // SHOpenFolderAndSelectItems via the opener plugin; a hand-rolled
+    // `explorer /select,<path>` misparses the argument and shows an error.
+    if let Err(err) = tauri_plugin_opener::reveal_item_in_dir(path) {
         log::warn!("could not reveal {} in Explorer: {err}", path.display());
     }
 }
@@ -1164,6 +1168,7 @@ pub fn run() {
             focus_widget(app);
         }))
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,

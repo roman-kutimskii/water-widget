@@ -240,7 +240,7 @@ Alternatives considered:
 ## 12. Edge cases checklist
 
 - [ ] Launch when already overdue from the previous session (crash recovery).
-- [ ] User clicks "drink" 3× in 10 s: merge events within 60 s, count once.
+- [ ] User clicks "drink" 3× in 10 s: merge clicks within 10 s of the last counted drink, count once (never merged against a reset).
 - [ ] Interval changed while draining: recompute from the same `lastDrinkTs`.
 - [ ] Widget dragged off-screen / monitor unplugged.
 - [ ] Two instances launched: single-instance lock, focus the existing one.
