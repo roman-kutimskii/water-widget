@@ -249,6 +249,20 @@ testSoundBtn.addEventListener('click', () => {
   e.preventDefault()
 );
 
+// The window is created once at startup; closing it only hides it so the next
+// open is instant. Intercepting here works reliably on Windows, unlike hide()
+// from the Rust close handler.
+getCurrentWindow()
+  .onCloseRequested(async (event) => {
+    event.preventDefault();
+    try {
+      await getCurrentWindow().hide();
+    } catch (err) {
+      console.error('hide failed', err);
+    }
+  })
+  .catch((err) => console.error('onCloseRequested failed', err));
+
 // Escape hides the settings window (same as the close button).
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {

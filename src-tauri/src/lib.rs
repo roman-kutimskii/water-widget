@@ -419,27 +419,57 @@ fn placeholder_tick(now: i64) -> Tick {
 
 // ---------------------------------------------------------------- windows
 
-fn show_settings_window(app: &AppHandle) -> tauri::Result<()> {
-    if let Some(window) = app.get_webview_window(SETTINGS_LABEL) {
-        window.show()?;
-        window.unminimize().ok();
-        window.set_focus()?;
+/// The settings window is created once (hidden, at startup) so opening it is
+/// instant; closing hides it (see the CloseRequested handler in `run`).
+fn create_settings_window(app: &AppHandle, visible: bool) -> tauri::Result<()> {
+    if app.get_webview_window(SETTINGS_LABEL).is_some() {
         return Ok(());
     }
-
     let window =
         WebviewWindowBuilder::new(app, SETTINGS_LABEL, WebviewUrl::App("settings.html".into()))
             .title("Tide — Settings")
             .inner_size(380.0, 560.0)
             .resizable(false)
-            .visible(true)
+            .visible(visible)
+            .focused(visible)
+            // Hidden from the taskbar during the warm-up; restored afterwards.
+            .skip_taskbar(!visible)
             .center()
             .build()?;
 
-    // Hide instead of destroy so reopening is instant and state is preserved.
-    // The window is destroyed on close and recreated lazily on the next
-    // open_settings; hide-on-close proved unreliable on Windows.
-    window.set_focus()?;
+    if !visible {
+        // WebView2 finishes initialising only once the window is first shown,
+        // which costs a few seconds. Pay that at startup: show it far
+        // off-screen, then hide and centre it once it has settled.
+        window.set_position(PhysicalPosition::new(-20_000, -20_000))?;
+        window.show()?;
+        let warm = window.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(2_500));
+            if let Err(err) = warm.hide() {
+                log::warn!("settings warm-up hide failed: {err}");
+            }
+            if let Err(err) = warm.center() {
+                log::warn!("settings warm-up center failed: {err}");
+            }
+            if let Err(err) = warm.set_skip_taskbar(false) {
+                log::warn!("settings warm-up skip_taskbar reset failed: {err}");
+            }
+        });
+    }
+    Ok(())
+}
+
+fn show_settings_window(app: &AppHandle) -> tauri::Result<()> {
+    if app.get_webview_window(SETTINGS_LABEL).is_none() {
+        // Fallback if the pre-created window is gone for any reason.
+        create_settings_window(app, true)?;
+    }
+    if let Some(window) = app.get_webview_window(SETTINGS_LABEL) {
+        window.show()?;
+        window.unminimize().ok();
+        window.set_focus()?;
+    }
     Ok(())
 }
 
@@ -1146,6 +1176,10 @@ pub fn run() {
             app.manage(Mutex::new(state));
 
             place_widget(&handle, stored_position, settings.layout, settings.scale);
+            // Pre-create the settings window hidden so opening it is instant.
+            if let Err(err) = create_settings_window(&handle, false) {
+                log::warn!("could not pre-create settings window: {err}");
+            }
             apply_always_on_top(&handle, settings.always_on_top);
             apply_click_through(&handle, settings.click_through);
             apply_autostart(&handle, settings.autostart);
@@ -1169,8 +1203,10 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // Closing the widget quits; the settings window installs its own
-            // hide-on-close handler when it is created.
+            // Closing the widget quits. Closing settings only hides it (so the
+            // next open is instant); that is handled on the page side via
+            // onCloseRequested, because hide() from this handler is ignored
+            // on Windows.
             if let WindowEvent::CloseRequested { .. } = event {
                 if window.label() == WIDGET_LABEL {
                     if let Some(state) = window.app_handle().try_state::<Mutex<AppState>>() {
