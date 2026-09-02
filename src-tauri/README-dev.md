@@ -43,11 +43,17 @@ Everything lives in the Tauri `app_config_dir`, which on Windows is
 
 | File            | Contents |
 |-----------------|----------|
-| `settings.json` | MVP fields plus the v0.2 ones (active/quiet hours, dailyGoal, alwaysOnTop, clickThrough, autostart, hotkey*, toastEnabled, nudge*, sound*) |
-| `state.json`    | `{ version, lastDrinkTs, todayCount, dayKey, position, pausedAccumMs, pausedSince, snoozeMs, lastMode }` |
+| `settings.json` | MVP fields, the v0.2 ones (active/quiet hours, dailyGoal, alwaysOnTop, clickThrough, autostart, hotkey*, toastEnabled, nudge*, sound*) and the v0.3 Look ones (`layout`, `scale`, `colorPreset`, `reducedMotion`) |
+| `state.json`    | `{ version, lastDrinkTs, todayCount, dayKey, position, pausedAccumMs, pausedSince, snoozeMs, lastMode, streak, bestStreak }` |
 | `history.jsonl` | one `{ ts, type: drink|snooze|pause|resume|reset, source, minutes? }` per line |
+| `export/`       | CSV exports written by the `export_csv` command, one file per export: `tide-history-YYYYMMDD-HHMMSS.csv` |
 
-Files written by the MVP still load: every v0.2 field has a serde default.
+Files written by the MVP still load: every v0.2 and v0.3 field has a serde
+default. `STATE_VERSION` is **2** since v0.3; a state file still at version 1
+has no streak data, so the streak and the best streak are rebuilt once from
+`history.jsonl` on startup and the file is rewritten at version 2. An unknown
+value for one of the three Look enums (say `"layout": "diagonal"`) falls back to
+that field's default instead of invalidating the whole file.
 
 Missing or corrupt files fall back to defaults; writes are atomic (temp + rename).
 Deleting the directory resets the app to first-launch behaviour.
@@ -61,14 +67,19 @@ Deleting the directory resets the app to first-launch behaviour.
   quiet suppression, 5 min welcome-back grace), `away_outcome`, `day_key`
   (04:00 rollover), `should_merge_drink` (60 s). No IO, no Tauri.
 - `src/store.rs` — settings/state/history persistence, clamping and validation
-  (HH:MM strings, hotkey shape).
+  (HH:MM strings, hotkey shape, `scale` clamped to 0.75..1.5), the `Layout` /
+  `ColorPreset` / `ReducedMotion` enums, `load_history` / `truncate_history`.
+- `src/stats.rs` — pure and unit-tested: `rolled_over_streak` (the day-rollover
+  rule), `rebuild_streaks` (recover both counters from history) and
+  `compute_stats` (the 14-day summary). No IO, no Tauri.
 - `src/platform.rs` — the only Win32 code: `session_locked`
   (`OpenInputDesktop` + `GetUserObjectInformationW`), `notifications_suppressed`
   (`SHQueryUserNotificationState`), `cursor_position` (`GetCursorPos`). Each has
   a no-op fallback on non-Windows targets.
 - `src/lib.rs` — Tauri wiring only: commands, the 1 Hz tick loop that drives all
   automatic transitions, the 2 s platform poll, the 100 ms click-through poll,
-  tray, windows, hotkey/autostart/always-on-top application.
+  tray, windows, hotkey/autostart/always-on-top application, plus the v0.3
+  window-size owner (`widget_size` / `apply_widget_size`) and the CSV export.
 - `capabilities/default.json` — permissions for both windows (includes
   `core:window:allow-start-dragging` for `data-tauri-drag-region` and the
   `notification` / `global-shortcut` / `autostart` plugin defaults).
@@ -99,3 +110,61 @@ Set `RUST_LOG=debug` and watch the console; every transition below logs a line.
 
 Do not run two instances: `tauri-plugin-single-instance` focuses the existing
 widget instead.
+
+## v0.3 features and how to test them by hand
+
+### Window size is owned by Rust
+
+`widget_size(layout, scale)` is the single source of truth:
+
+| layout | logical size (before `scale`) |
+|---|---|
+| `horizontal` | 220 × 28 |
+| `compact` | 220 × 28 (the window keeps the full pill; the UI draws the hairline) |
+| `vertical` | 28 × 220 |
+
+`scale` multiplies both axes and is clamped to 0.75..1.5. The size is applied on
+startup (`place_widget`) and from `set_settings` whenever `layout` or `scale`
+changes; `apply_widget_size` restores the outer top-left corner afterwards, so
+the bar grows to the right/down instead of wandering. The default bottom-right
+placement measures the real window, so a vertical or scaled widget still lands
+24 px off the work-area corner.
+
+After every resize (startup and `set_settings` alike) the widget is clamped back
+into the work area of the monitor holding its top-left corner, falling back to
+the primary monitor: growing from `horizontal` to a scaled `vertical` at the
+bottom-right corner would otherwise leave the taller window hanging below the
+screen. The rect math is the pure, tested `clamp_rect_into(area, pos, size)` —
+no margin, and a window bigger than the work area is aligned to its top-left
+corner. A clamped position is written straight back to `state.json`.
+
+The click-through grip follows the layout: the rightmost `20 × scale` logical px
+for `horizontal` / `compact`, the bottom `20 × scale` for `vertical`. The 100 ms
+poll reads the current layout and scale from settings, so changing either while
+click-through is on takes effect immediately.
+
+### Streak semantics
+
+- A streak counts **completed** days whose drink count reached `dailyGoal`.
+  Today is never included: it only counts once the 04:00 rollover happens.
+- At the rollover the day that just ended is folded in: `todayCount >= dailyGoal`
+  → `streak += 1`, otherwise `streak = 0`. `bestStreak` is the running maximum
+  and is never lowered — `reset_all` keeps it.
+- A day with no drinks at all breaks the streak, including days the app was not
+  running: the rebuild walks every calendar day from the first recorded drink.
+- `streak` rides on every `tick`; `streak` / `bestStreak` also come back from
+  `get_stats`, recomputed from history so the view cannot drift from the file.
+- To exercise it, set `dailyGoal` to 1, log a drink, then move the system clock
+  past the next 04:00: the tick loop logs `day rollover … streak 0 -> 1`.
+
+### New commands
+
+| Command | Returns | Notes |
+|---|---|---|
+| `get_stats` | `Stats` | 14 days, oldest first, empty days zeroed. `avgGapMin` is `null` below two drinks that day; `longestOverdueMin` is `max(0, gap − interval)` over that day's gaps only, so the overnight span never counts. `totalDrinks` spans the whole file, not the window. |
+| `export_csv` | `{ path }` | Writes `%APPDATA%\dev.kutimskii.tide\export\tide-history-YYYYMMDD-HHMMSS.csv`, header `ts_iso,type,source,minutes`, timestamps ISO 8601 local with the UTC offset, `minutes` empty for non-snooze rows. Then runs `explorer /select,<path>`; a failure there is logged and ignored, the path is still returned. |
+| `open_data_dir` | – | `explorer <data dir>`; best effort. |
+| `reset_all` | `Tick` | Truncates `history.jsonl` and appends one `{"type":"reset","source":"ui"}` line so the file is never empty; `todayCount` and `streak` go to 0, the timer goes back to full, the nudge schedule is cleared. `bestStreak`, settings and the widget position survive. The UI confirms first. |
+
+Malformed lines in `history.jsonl` are skipped with a warning rather than
+failing a stats call or an export.

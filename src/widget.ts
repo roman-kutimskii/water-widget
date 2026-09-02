@@ -11,27 +11,61 @@ const fillEl = document.getElementById('fill') as HTMLDivElement;
 const textEl = document.getElementById('text') as HTMLDivElement;
 const btnDrink = document.getElementById('btn-drink') as HTMLButtonElement;
 const btnPause = document.getElementById('btn-pause') as HTMLButtonElement;
+const htmlEl = document.documentElement;
 
 let currentTick: Tick | null = null;
 let currentSettings: Settings | null = null;
+
+function applyGlobalSettingsClasses(settings: Settings | null) {
+  const s = settings;
+  const layout = s?.layout ?? 'horizontal';
+  htmlEl.classList.remove('layout-horizontal', 'layout-vertical', 'layout-compact');
+  htmlEl.classList.add(`layout-${layout}`);
+
+  const rm = s?.reducedMotion ?? 'system';
+  htmlEl.classList.remove('rm-on', 'rm-off');
+  if (rm === 'on') htmlEl.classList.add('rm-on');
+  else if (rm === 'off') htmlEl.classList.add('rm-off');
+
+  const preset = s?.colorPreset ?? 'default';
+  htmlEl.classList.remove('preset-default', 'preset-colorblind', 'preset-mono');
+  htmlEl.classList.add(`preset-${preset}`);
+
+  const scale = s?.scale ?? 1.0;
+  htmlEl.style.fontSize = `${12 * scale}px`;
+}
 
 function render() {
   if (!currentTick) return;
   const tick = currentTick;
   const settings = currentSettings;
+  const preset = settings?.colorPreset ?? 'default';
+  const layout = settings?.layout ?? 'horizontal';
 
   pillEl.classList.toggle('overdue', tick.zone === 'overdue' && tick.mode === 'active');
+  pillEl.classList.toggle('urgent', tick.zone === 'urgent' && tick.mode === 'active');
   pillEl.classList.toggle('paused', tick.mode === 'paused');
   pillEl.classList.toggle('sleeping', tick.mode === 'sleeping');
   pillEl.classList.toggle('quiet', tick.quiet);
   pillEl.classList.toggle('click-through', !!settings?.clickThrough);
 
+  const isVertical = layout === 'vertical';
+
   if (tick.mode === 'paused' || tick.mode === 'sleeping') {
-    fillEl.style.width = '100%';
+    if (isVertical) {
+      fillEl.style.height = '100%';
+    } else {
+      fillEl.style.width = '100%';
+    }
     fillEl.style.backgroundColor = '#9CA3AF';
   } else {
-    const color = fillColor(tick.fill);
-    fillEl.style.width = `${tick.fill * 100}%`;
+    const color = fillColor(tick.fill, preset);
+    if (isVertical) {
+      fillEl.style.height = `${tick.fill * 100}%`;
+      fillEl.style.width = '100%';
+    } else {
+      fillEl.style.width = `${tick.fill * 100}%`;
+    }
     fillEl.style.backgroundColor = color;
   }
 
@@ -88,6 +122,7 @@ async function init() {
   ]);
   currentTick = tick;
   currentSettings = settings;
+  applyGlobalSettingsClasses(currentSettings);
   render();
 
   await listen<Tick>('tick', (event) => {
@@ -97,6 +132,7 @@ async function init() {
 
   await listen<Settings>('settings-changed', (event) => {
     currentSettings = event.payload;
+    applyGlobalSettingsClasses(currentSettings);
     render();
   });
 
@@ -244,5 +280,23 @@ getCurrentWindow()
     }, 300);
   })
   .catch((err) => console.error('onMoved subscription failed', err));
+
+// --- Compact layout: expand to full pill on hover, collapse 1.5s after leave. ---
+let compactCollapseTimer: number | undefined;
+
+pillEl.addEventListener('mouseenter', () => {
+  if (compactCollapseTimer !== undefined) {
+    window.clearTimeout(compactCollapseTimer);
+    compactCollapseTimer = undefined;
+  }
+  pillEl.classList.add('expanded');
+});
+
+pillEl.addEventListener('mouseleave', () => {
+  if (compactCollapseTimer !== undefined) window.clearTimeout(compactCollapseTimer);
+  compactCollapseTimer = window.setTimeout(() => {
+    pillEl.classList.remove('expanded');
+  }, 1500);
+});
 
 init().catch((err) => console.error('widget init failed', err));

@@ -6,27 +6,32 @@
   box-sizing: border-box;
 }
 
+html {
+  /* scale multiplies effective font size; widget.ts sets this per settings.scale */
+  font-size: 12px;
+}
+
 html,
 body {
   margin: 0;
   padding: 0;
-  width: 220px;
-  height: 28px;
+  width: 100vw;
+  height: 100vh;
   overflow: hidden;
   background: transparent;
   user-select: none;
   -webkit-user-select: none;
   font-family:
     -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  font-size: 12px;
+  font-size: 1rem;
   cursor: default;
 }
 
 .pill {
   position: relative;
-  width: 220px;
-  height: 28px;
-  border-radius: 14px;
+  width: 100%;
+  height: 100%;
+  border-radius: 1.1667em; /* ~14px at 12px base */
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.18);
   background: rgba(20, 20, 25, 0.75);
@@ -55,13 +60,15 @@ body {
   background: #3b82f6;
   transition:
     width 1s linear,
+    height 1s linear,
     background-color 1s linear;
-  will-change: width, background-color;
+  will-change: width, height, background-color;
 }
 
 .fill.splash {
   transition:
     width 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+    height 0.3s cubic-bezier(0.16, 1, 0.3, 1),
     background-color 0.3s ease;
 }
 
@@ -80,10 +87,15 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pill.overdue .fill {
+  html:not(.rm-off) .pill.overdue .fill {
     animation: none;
     opacity: 1;
   }
+}
+
+html.rm-on .pill.overdue .fill {
+  animation: none;
+  opacity: 1;
 }
 
 .text {
@@ -92,7 +104,7 @@ body {
   height: 100%;
   display: flex;
   align-items: center;
-  padding: 0 10px;
+  padding: 0 0.83em;
   font-weight: 500;
   white-space: nowrap;
   color: #ffffff;
@@ -142,10 +154,31 @@ body {
   }
 }
 
+html.layout-vertical .pill.wobble {
+  animation-name: wobble-vertical;
+}
+
+@keyframes wobble-vertical {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  25% {
+    transform: translateY(-3px);
+  }
+  75% {
+    transform: translateY(3px);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .pill.wobble {
+  html:not(.rm-off) .pill.wobble {
     animation: none;
   }
+}
+
+html.rm-on .pill.wobble {
+  animation: none;
 }
 
 /* --- hover mini buttons --- */
@@ -180,14 +213,14 @@ body {
 }
 
 .mini-btn {
-  width: 20px;
-  height: 20px;
+  width: 1.67em;
+  height: 1.67em;
   padding: 0;
   border: none;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.22);
   color: #ffffff;
-  font-size: 11px;
+  font-size: 0.92em;
   line-height: 1;
   display: flex;
   align-items: center;
@@ -211,7 +244,7 @@ body {
   display: none;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
+  font-size: 0.92em;
   letter-spacing: -2px;
   color: rgba(255, 255, 255, 0.55);
   pointer-events: none;
@@ -219,4 +252,131 @@ body {
 
 .pill.click-through .grip {
   display: flex;
+}
+
+/* ==================== v0.3 layouts ==================== */
+
+/* --- horizontal (default): as above --- */
+
+/* --- vertical layout --- */
+html.layout-vertical .pill {
+  border-radius: 1.1667em;
+}
+
+html.layout-vertical .fill {
+  top: auto;
+  left: 0;
+  bottom: 0;
+  right: 0;
+  width: 100%;
+  height: 100%; /* set inline by widget.ts to fill % */
+}
+
+html.layout-vertical .text {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0.5em;
+  top: auto;
+  height: auto;
+  flex-direction: column;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-size: 11px;
+  padding: 0.5em 0;
+  justify-content: flex-start;
+  align-items: center;
+}
+
+html.layout-vertical .hover-controls {
+  top: auto;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  flex-direction: column;
+  padding: 4px 0;
+  background: linear-gradient(to bottom, transparent, rgba(0, 0, 0, 0.35) 30%);
+}
+
+html.layout-vertical .grip {
+  top: auto;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  width: 100%;
+  height: 20px;
+  letter-spacing: 0;
+  transform: rotate(90deg);
+}
+
+/* --- compact layout: hairline collapsed by default, expands on hover --- */
+
+.hairline {
+  display: none;
+}
+
+html.layout-compact .pill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 6px;
+  border-radius: 3px;
+  transition: height 0.15s ease;
+  overflow: hidden;
+}
+
+html.layout-compact .pill .text,
+html.layout-compact .pill .hover-controls,
+html.layout-compact .pill .grip {
+  opacity: 0;
+  transition: opacity 0.1s ease;
+  pointer-events: none;
+}
+
+html.layout-compact .pill.expanded {
+  height: 100%;
+}
+
+html.layout-compact .pill.expanded .text,
+html.layout-compact .pill.expanded .hover-controls {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+html.layout-compact .pill.expanded.click-through .grip {
+  opacity: 1;
+}
+
+html.rm-on html.layout-compact .pill,
+html.layout-compact.rm-on .pill {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html.layout-compact:not(.rm-off) .pill {
+    transition: none;
+  }
+}
+
+/* ==================== v0.3 color presets ==================== */
+
+/* Mono: hatch overlay on the fill while in the urgent zone. */
+html.preset-mono .pill.urgent .fill::after,
+html.preset-mono .pill.overdue .fill::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    45deg,
+    rgba(0, 0, 0, 0.25) 0,
+    rgba(0, 0, 0, 0.25) 2px,
+    transparent 2px,
+    transparent 4px
+  );
+  pointer-events: none;
+}
+
+html.preset-mono .pill.overdue .fill {
+  animation: overdue-pulse 1.5s ease-in-out infinite;
 }

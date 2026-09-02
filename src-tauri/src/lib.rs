@@ -5,12 +5,15 @@
 
 pub mod engine;
 pub mod platform;
+pub mod stats;
 pub mod store;
 
+use std::io::Write;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use chrono::{Local, TimeZone};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{
@@ -24,11 +27,16 @@ use engine::{
     minutes_of_day, should_merge_drink, AwayOutcome, Mode, Nudge, NudgeKind, NudgeState, Tick,
     TimerState, SLEEP_GAP_MS,
 };
-use store::{HistoryEntry, PersistedState, Position, Settings, Store};
+use stats::Stats;
+use store::{
+    HistoryEntry, Layout, PersistedState, Position, Settings, Store, SCALE_MAX, SCALE_MIN,
+};
 
 pub const WIDGET_LABEL: &str = "widget";
 pub const SETTINGS_LABEL: &str = "settings";
 const SCREEN_MARGIN_PX: i32 = 24;
+/// Logical size of the horizontal layout before `scale`; the vertical layout
+/// is the same rectangle turned on its side (CONTRACT v0.3).
 const WIDGET_W: f64 = 220.0;
 const WIDGET_H: f64 = 28.0;
 /// Width of the always-clickable grip at the right edge, in logical px.
@@ -80,24 +88,51 @@ impl AppState {
             self.settings.interval_ms(),
             self.state.today_count,
             self.quiet(now),
+            self.state.streak,
         )
     }
 
-    /// Reset today's count when the logical day (04:00 rollover) changed.
-    /// Returns true when anything changed.
+    /// Reset today's count when the logical day (04:00 rollover) changed, and
+    /// fold the day that just ended into the streak first. Returns true when
+    /// anything changed.
     fn apply_day_rollover(&mut self, now: i64) -> bool {
         let key = day_key_local(now);
         if key == self.state.day_key {
             return false;
         }
-        log::info!("day rollover {} -> {key}", self.state.day_key);
+        let (streak, best) = stats::rolled_over_streak(
+            self.state.streak,
+            self.state.best_streak,
+            self.state.today_count,
+            self.settings.daily_goal,
+        );
+        log::info!(
+            "day rollover {} -> {key}: {} drinks, streak {} -> {streak} (best {best})",
+            self.state.day_key,
+            self.state.today_count,
+            self.state.streak
+        );
+        self.state.streak = streak;
+        self.state.best_streak = best;
         self.state.day_key = key;
         self.state.today_count = 0;
         true
     }
 
+    fn compute_stats(&self, now: i64) -> Stats {
+        stats::compute_stats(
+            &self.store.load_history(),
+            now,
+            self.settings.interval_ms(),
+            self.settings.daily_goal,
+            local_offset_secs(),
+        )
+    }
+
     /// Mirror the in-memory timer into the persisted shape and write it out.
     fn persist_state(&mut self) {
+        // Writing always upgrades the file to the current shape.
+        self.state.version = store::STATE_VERSION;
         self.state.last_drink_ts = self.timer.last_drink_ts;
         self.state.paused_accum_ms = self.timer.paused_accum_ms;
         self.state.paused_since = self.timer.paused_since;
@@ -201,6 +236,9 @@ fn set_settings(app: AppHandle, state: SharedState<'_>, settings: Settings) -> S
         if settings.click_through != previous.click_through {
             apply_click_through(&app, settings.click_through);
         }
+        if settings.layout != previous.layout || settings.scale != previous.scale {
+            apply_widget_size(&app, settings.layout, settings.scale);
+        }
 
         guard.settings = settings.clone();
         if let Err(err) = guard.store.save_settings(&settings) {
@@ -260,6 +298,119 @@ fn reset_today(app: AppHandle, state: SharedState<'_>) -> Tick {
     tick
 }
 
+#[tauri::command]
+fn get_stats(state: SharedState<'_>) -> Stats {
+    lock(&state).compute_stats(now_ms())
+}
+
+/// Path returned by `export_csv`.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ExportResult {
+    pub path: String,
+}
+
+#[tauri::command]
+fn export_csv(state: SharedState<'_>) -> Result<ExportResult, String> {
+    let (dir, entries) = {
+        let guard = lock(&state);
+        let dir = guard.store.export_dir().map_err(|e| e.to_string())?;
+        (dir, guard.store.load_history())
+    };
+    let name = format!("tide-history-{}.csv", Local::now().format("%Y%m%d-%H%M%S"));
+    let path = dir.join(name);
+    write_history_csv(&path, &entries).map_err(|e| e.to_string())?;
+    log::info!(
+        "exported {} history entries to {}",
+        entries.len(),
+        path.display()
+    );
+    reveal_in_explorer(&path);
+    Ok(ExportResult {
+        path: path.to_string_lossy().into_owned(),
+    })
+}
+
+#[tauri::command]
+fn open_data_dir(state: SharedState<'_>) -> Result<(), String> {
+    let dir = lock(&state).store.dir().to_path_buf();
+    // Best effort: a missing file manager must not fail the command loudly.
+    if let Err(err) = std::process::Command::new("explorer").arg(&dir).spawn() {
+        log::warn!("could not open {}: {err}", dir.display());
+    }
+    Ok(())
+}
+
+/// Wipes history and the counters, keeps settings and the widget position.
+/// The UI is responsible for confirming first.
+#[tauri::command]
+fn reset_all(app: AppHandle, state: SharedState<'_>) -> Tick {
+    let now = now_ms();
+    let tick = {
+        let mut guard = lock(&state);
+        if let Err(err) = guard.store.truncate_history() {
+            log::error!("could not truncate history.jsonl: {err}");
+        }
+        // Appended right after the truncation so the file is never empty.
+        guard.log_history(&HistoryEntry::reset(now, "ui"));
+
+        guard.state.today_count = 0;
+        guard.state.day_key = day_key_local(now);
+        guard.state.streak = 0; // bestStreak is a record; it survives.
+        guard.timer.reset_session(now);
+        guard.nudge = NudgeState::default();
+        guard.persist_state();
+        log::info!("reset_all: history cleared, counters back to zero");
+        guard.tick(now)
+    };
+    emit_tick(&app, &tick);
+    tick
+}
+
+/// `ts_iso,type,source,minutes`, ISO 8601 local time with the UTC offset.
+fn write_history_csv(path: &std::path::Path, entries: &[HistoryEntry]) -> std::io::Result<()> {
+    let file = std::fs::File::create(path)?;
+    let mut writer = std::io::BufWriter::new(file);
+    writeln!(writer, "ts_iso,type,source,minutes")?;
+    for entry in entries {
+        writeln!(
+            writer,
+            "{},{},{},{}",
+            csv_field(&iso_local(entry.ts)),
+            csv_field(&entry.kind),
+            csv_field(&entry.source),
+            entry.minutes.map(|m| m.to_string()).unwrap_or_default(),
+        )?;
+    }
+    writer.flush()
+}
+
+/// ISO 8601 in the machine's local zone, offset included (`2026-09-02T13:45:00+03:00`).
+fn iso_local(ts_ms: i64) -> String {
+    match Local.timestamp_millis_opt(ts_ms).single() {
+        Some(dt) => dt.format("%Y-%m-%dT%H:%M:%S%:z").to_string(),
+        None => String::new(),
+    }
+}
+
+/// Minimal RFC 4180 quoting; history values are tame, but a hand-edited file
+/// must not be able to produce a broken CSV.
+fn csv_field(value: &str) -> String {
+    if value.contains([',', '"', '\n', '\r']) {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        value.to_string()
+    }
+}
+
+/// Select the freshly written file in Explorer. Non-fatal by design.
+fn reveal_in_explorer(path: &std::path::Path) {
+    // `/select,<path>` has to stay a single argument.
+    let arg = format!("/select,{}", path.display());
+    if let Err(err) = std::process::Command::new("explorer").arg(arg).spawn() {
+        log::warn!("could not reveal {} in Explorer: {err}", path.display());
+    }
+}
+
 /// Async on purpose: creating a window from a synchronous command deadlocks
 /// the webview on Windows (blank, unresponsive window).
 #[tauri::command]
@@ -307,7 +458,7 @@ fn set_paused_inner(app: &AppHandle, paused: bool, source: &str) -> Tick {
 /// Only reachable if the managed state disappeared (shutdown); keeps the
 /// command signatures total instead of unwrapping.
 fn placeholder_tick(now: i64) -> Tick {
-    compute_tick_full(now, &TimerState::new(now), 45 * 60_000, 0, false)
+    compute_tick_full(now, &TimerState::new(now), 45 * 60_000, 0, false, 0)
 }
 
 // ---------------------------------------------------------------- windows
@@ -338,15 +489,16 @@ fn show_settings_window(app: &AppHandle) -> tauri::Result<()> {
 
 /// Restore the stored position when it still lands on a connected monitor,
 /// otherwise park the widget bottom-right on the primary monitor.
-fn place_widget(app: &AppHandle, stored: Option<Position>) {
+fn place_widget(app: &AppHandle, stored: Option<Position>, layout: Layout, ui_scale: f64) {
     let Some(window) = app.get_webview_window(WIDGET_LABEL) else {
         log::error!("widget window missing at setup");
         return;
     };
 
     // Frameless windows on Windows can come up taller than the configured
-    // inner size; pin it to the contract size explicitly.
-    if let Err(err) = window.set_size(LogicalSize::new(WIDGET_W, WIDGET_H)) {
+    // inner size; pin it to the layout size explicitly.
+    let size = widget_size(layout, ui_scale);
+    if let Err(err) = window.set_size(size) {
         log::warn!("could not set widget size: {err}");
     }
 
@@ -365,6 +517,9 @@ fn place_widget(app: &AppHandle, stored: Option<Position>) {
                     if let Err(err) = window.set_position(PhysicalPosition::new(pos.x, pos.y)) {
                         log::warn!("could not restore widget position: {err}");
                     }
+                    // The stored corner was chosen for a possibly smaller
+                    // window; a taller layout must not hang off the screen.
+                    clamp_widget_into_work_area(app);
                     return;
                 }
                 log::info!("stored position {pos:?} is off-screen; using default");
@@ -390,13 +545,132 @@ fn place_widget(app: &AppHandle, stored: Option<Position>) {
     let area = primary.work_area();
     let widget = window
         .outer_size()
-        .unwrap_or_else(|_| LogicalSize::new(WIDGET_W, WIDGET_H).to_physical(scale));
+        .unwrap_or_else(|_| size.to_physical(scale));
     let margin = (SCREEN_MARGIN_PX as f64 * scale).round() as i32;
 
     let x = area.position.x + area.size.width as i32 - widget.width as i32 - margin;
     let y = area.position.y + area.size.height as i32 - widget.height as i32 - margin;
     if let Err(err) = window.set_position(PhysicalPosition::new(x, y)) {
         log::warn!("could not place widget: {err}");
+    }
+    clamp_widget_into_work_area(app);
+}
+
+/// The window size a layout asks for, in logical pixels, with `ui_scale`
+/// (Settings `scale`, 0.75..1.5) applied. Rust owns this: the UI only ever
+/// paints inside whatever it gets.
+pub fn widget_size(layout: Layout, ui_scale: f64) -> LogicalSize<f64> {
+    let factor = if ui_scale.is_finite() {
+        ui_scale.clamp(SCALE_MIN, SCALE_MAX)
+    } else {
+        1.0
+    };
+    let (w, h) = match layout {
+        // `compact` keeps the full pill window; the UI shrinks what it draws.
+        Layout::Horizontal | Layout::Compact => (WIDGET_W, WIDGET_H),
+        Layout::Vertical => (WIDGET_H, WIDGET_W),
+    };
+    LogicalSize::new(w * factor, h * factor)
+}
+
+/// Resize the widget in place: the outer top-left corner is restored after the
+/// resize so the bar does not wander when the layout or scale changes.
+fn apply_widget_size(app: &AppHandle, layout: Layout, ui_scale: f64) {
+    let Some(window) = app.get_webview_window(WIDGET_LABEL) else {
+        return;
+    };
+    let origin = window.outer_position().ok();
+    if let Err(err) = window.set_size(widget_size(layout, ui_scale)) {
+        log::warn!("could not resize widget: {err}");
+        return;
+    }
+    if let Some(origin) = origin {
+        if let Err(err) = window.set_position(origin) {
+            log::warn!("could not keep widget position after resize: {err}");
+        }
+    }
+    clamp_widget_into_work_area(app);
+}
+
+/// Nudge `pos` so a `size` rectangle sits inside `area`, without resizing it.
+/// Everything is physical pixels; `area` is `(x, y, width, height)`. A window
+/// larger than the area is aligned to its top-left corner rather than pushed
+/// off the opposite edge.
+pub fn clamp_rect_into(
+    area: (i32, i32, i32, i32),
+    pos: (i32, i32),
+    size: (i32, i32),
+) -> (i32, i32) {
+    let (ax, ay, aw, ah) = area;
+    let (w, h) = size;
+    let axis = |start: i32, extent: i32, want: i32, len: i32| {
+        if len >= extent {
+            start
+        } else {
+            want.clamp(start, start + extent - len)
+        }
+    };
+    (axis(ax, aw, pos.0, w), axis(ay, ah, pos.1, h))
+}
+
+/// Keep the widget inside the work area of the monitor it sits on (the one
+/// containing its top-left corner, else the primary). Called after every
+/// resize, because a taller layout can push the bar under the taskbar or off
+/// the bottom of the screen. The corrected position is persisted.
+fn clamp_widget_into_work_area(app: &AppHandle) {
+    let Some(window) = app.get_webview_window(WIDGET_LABEL) else {
+        return;
+    };
+    let (Ok(pos), Ok(size)) = (window.outer_position(), window.outer_size()) else {
+        log::warn!("could not measure the widget; skipping the work-area clamp");
+        return;
+    };
+    let size = (size.width as i32, size.height as i32);
+
+    let monitor = window
+        .available_monitors()
+        .ok()
+        .and_then(|monitors| {
+            monitors.into_iter().find(|m| {
+                let origin = m.position();
+                let extent = m.size();
+                pos.x >= origin.x
+                    && pos.y >= origin.y
+                    && pos.x < origin.x + extent.width as i32
+                    && pos.y < origin.y + extent.height as i32
+            })
+        })
+        .or_else(|| window.primary_monitor().ok().flatten());
+    let Some(monitor) = monitor else {
+        log::warn!("no monitor to clamp the widget into; leaving it where it is");
+        return;
+    };
+
+    let work = monitor.work_area();
+    let area = (
+        work.position.x,
+        work.position.y,
+        work.size.width as i32,
+        work.size.height as i32,
+    );
+    let (x, y) = clamp_rect_into(area, (pos.x, pos.y), size);
+    if (x, y) == (pos.x, pos.y) {
+        return;
+    }
+    log::info!(
+        "widget at ({}, {}) size {:?} does not fit {area:?}; moving to ({x}, {y})",
+        pos.x,
+        pos.y,
+        size
+    );
+    if let Err(err) = window.set_position(PhysicalPosition::new(x, y)) {
+        log::warn!("could not clamp widget into the work area: {err}");
+        return;
+    }
+    if let Some(state) = app.try_state::<Mutex<AppState>>() {
+        let mut guard = lock(&state);
+        guard.state.position = Some(Position { x, y });
+        guard.persist_state();
     }
 }
 
@@ -447,7 +721,14 @@ fn apply_click_through(app: &AppHandle, enabled: bool) {
             let Some(window) = app.get_webview_window(WIDGET_LABEL) else {
                 return;
             };
-            let over_grip = cursor_over_grip(&window).unwrap_or(false);
+            let (layout, ui_scale) = match app.try_state::<Mutex<AppState>>() {
+                Some(state) => {
+                    let guard = lock(&state);
+                    (guard.settings.layout, guard.settings.scale)
+                }
+                None => return,
+            };
+            let over_grip = cursor_over_grip(&window, layout, ui_scale).unwrap_or(false);
             if over_grip == ignoring {
                 // Cursor on the grip -> stop ignoring; off it -> ignore again.
                 if let Err(err) = window.set_ignore_cursor_events(!over_grip) {
@@ -462,17 +743,57 @@ fn apply_click_through(app: &AppHandle, enabled: bool) {
 }
 
 /// True when the global cursor sits inside the grip rectangle. Everything is
-/// compared in physical pixels; the grip width is scaled by the window's DPI.
-fn cursor_over_grip<R: Runtime>(window: &tauri::WebviewWindow<R>) -> Option<bool> {
-    let (cx, cy) = platform::cursor_position()?;
+/// compared in physical pixels; the grip is `GRIP_WIDTH_PX` logical px times
+/// the Settings scale, times the window's DPI factor.
+fn cursor_over_grip<R: Runtime>(
+    window: &tauri::WebviewWindow<R>,
+    layout: Layout,
+    ui_scale: f64,
+) -> Option<bool> {
+    let cursor = platform::cursor_position()?;
     let origin = window.outer_position().ok()?;
     let size = window.outer_size().ok()?;
-    let scale = window.scale_factor().unwrap_or(1.0);
-    let grip = (GRIP_WIDTH_PX * scale).round() as i32;
+    let dpi = window.scale_factor().unwrap_or(1.0);
+    let grip = grip_px(ui_scale, dpi);
+    Some(in_grip(
+        layout,
+        (origin.x, origin.y),
+        (size.width as i32, size.height as i32),
+        grip,
+        cursor,
+    ))
+}
 
-    let right = origin.x + size.width as i32;
-    let bottom = origin.y + size.height as i32;
-    Some(cx >= right - grip && cx < right && cy >= origin.y && cy < bottom)
+/// Grip thickness in physical pixels.
+fn grip_px(ui_scale: f64, dpi: f64) -> i32 {
+    let factor = if ui_scale.is_finite() {
+        ui_scale.clamp(SCALE_MIN, SCALE_MAX)
+    } else {
+        1.0
+    };
+    (GRIP_WIDTH_PX * factor * dpi).round().max(1.0) as i32
+}
+
+/// The grip strip follows the layout: the rightmost `grip` px for the
+/// horizontal and compact bars, the bottom `grip` px for the vertical one.
+/// All arguments are physical pixels.
+fn in_grip(
+    layout: Layout,
+    origin: (i32, i32),
+    size: (i32, i32),
+    grip: i32,
+    cursor: (i32, i32),
+) -> bool {
+    let (x, y) = origin;
+    let (w, h) = size;
+    let (cx, cy) = cursor;
+    if cx < x || cx >= x + w || cy < y || cy >= y + h {
+        return false;
+    }
+    match layout {
+        Layout::Horizontal | Layout::Compact => cx >= x + w - grip,
+        Layout::Vertical => cy >= y + h - grip,
+    }
 }
 
 // -------------------------------------------------------- hotkey/autostart
@@ -671,10 +992,25 @@ fn load_app_state(app: &AppHandle) -> AppState {
         .load_state()
         .unwrap_or_else(|| PersistedState::new(now, day_key_local(now)));
 
-    let key = day_key_local(now);
-    if key != state.day_key {
-        state.day_key = key;
-        state.today_count = 0;
+    // A pre-v0.3 state.json has no streak data; recover it from history once.
+    // The rebuild already accounts for every completed day, so the rollover
+    // below must not fold today's stale count in on top of it.
+    let rebuilt = state.needs_streak_rebuild();
+    if rebuilt {
+        let (streak, best) = stats::rebuild_streaks(
+            &store.load_history(),
+            now,
+            settings.daily_goal,
+            local_offset_secs(),
+        );
+        log::info!("upgrading state.json: rebuilt streak {streak}, best {best} from history");
+        state.streak = streak;
+        state.best_streak = best;
+        let key = day_key_local(now);
+        if key != state.day_key {
+            state.day_key = key;
+            state.today_count = 0;
+        }
     }
 
     let timer = TimerState {
@@ -694,6 +1030,10 @@ fn load_app_state(app: &AppHandle) -> AppState {
         locked_at: None,
         last_tick_ms: now,
     };
+    if !rebuilt {
+        // Normal path: the day may have rolled over while the app was closed.
+        app_state.apply_day_rollover(now);
+    }
     // Persist immediately so a first-launch timer survives a crash or restart.
     app_state.persist_state();
     app_state
@@ -833,6 +1173,10 @@ pub fn run() {
             set_settings,
             open_settings,
             save_position,
+            get_stats,
+            export_csv,
+            open_data_dir,
+            reset_all,
             quit
         ])
         .setup(|app| {
@@ -843,7 +1187,7 @@ pub fn run() {
             let paused = state.timer.paused_since.is_some();
             app.manage(Mutex::new(state));
 
-            place_widget(&handle, stored_position);
+            place_widget(&handle, stored_position, settings.layout, settings.scale);
             apply_always_on_top(&handle, settings.always_on_top);
             apply_click_through(&handle, settings.click_through);
             apply_autostart(&handle, settings.autostart);
@@ -879,4 +1223,166 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running Tide");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn widget_size_table_matches_the_contract() {
+        let s = widget_size(Layout::Horizontal, 1.0);
+        assert!((s.width - 220.0).abs() < 1e-9);
+        assert!((s.height - 28.0).abs() < 1e-9);
+
+        // Compact keeps the full pill window; only the painting differs.
+        let s = widget_size(Layout::Compact, 1.0);
+        assert!((s.width - 220.0).abs() < 1e-9);
+        assert!((s.height - 28.0).abs() < 1e-9);
+
+        // Vertical is the same rectangle on its side.
+        let s = widget_size(Layout::Vertical, 1.0);
+        assert!((s.width - 28.0).abs() < 1e-9);
+        assert!((s.height - 220.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn widget_size_applies_and_clamps_scale() {
+        let s = widget_size(Layout::Horizontal, 1.5);
+        assert!((s.width - 330.0).abs() < 1e-9);
+        assert!((s.height - 42.0).abs() < 1e-9);
+
+        let s = widget_size(Layout::Vertical, 0.75);
+        assert!((s.width - 21.0).abs() < 1e-9);
+        assert!((s.height - 165.0).abs() < 1e-9);
+
+        // Out-of-range and non-finite scales cannot produce a silly window.
+        assert_eq!(
+            widget_size(Layout::Horizontal, 99.0).width,
+            widget_size(Layout::Horizontal, SCALE_MAX).width
+        );
+        assert_eq!(
+            widget_size(Layout::Horizontal, 0.0).width,
+            widget_size(Layout::Horizontal, SCALE_MIN).width
+        );
+        assert_eq!(
+            widget_size(Layout::Horizontal, f64::NAN).width,
+            widget_size(Layout::Horizontal, 1.0).width
+        );
+    }
+
+    #[test]
+    fn grip_thickness_follows_scale_and_dpi() {
+        assert_eq!(grip_px(1.0, 1.0), 20);
+        assert_eq!(grip_px(1.5, 1.0), 30);
+        assert_eq!(grip_px(1.0, 2.0), 40);
+        assert_eq!(grip_px(1.25, 1.5), 38); // 20 * 1.25 * 1.5 = 37.5 -> 38
+                                            // Never zero-width, whatever nonsense comes in.
+        assert!(grip_px(f64::NAN, 1.0) > 0);
+        assert!(grip_px(0.0, 0.0) > 0);
+    }
+
+    #[test]
+    fn grip_rectangle_follows_the_layout() {
+        let origin = (100, 200);
+        let horizontal = (220, 28);
+        let vertical = (28, 220);
+        let grip = 20;
+
+        // Horizontal and compact: the rightmost 20 px.
+        for layout in [Layout::Horizontal, Layout::Compact] {
+            assert!(in_grip(layout, origin, horizontal, grip, (300, 210)));
+            assert!(in_grip(layout, origin, horizontal, grip, (319, 200)));
+            assert!(!in_grip(layout, origin, horizontal, grip, (299, 210)));
+            assert!(!in_grip(layout, origin, horizontal, grip, (110, 210)));
+            // Just outside the window on either axis.
+            assert!(!in_grip(layout, origin, horizontal, grip, (320, 210)));
+            assert!(!in_grip(layout, origin, horizontal, grip, (300, 228)));
+            assert!(!in_grip(layout, origin, horizontal, grip, (300, 199)));
+        }
+
+        // Vertical: the bottom 20 px instead.
+        assert!(in_grip(
+            Layout::Vertical,
+            origin,
+            vertical,
+            grip,
+            (110, 400)
+        ));
+        assert!(in_grip(
+            Layout::Vertical,
+            origin,
+            vertical,
+            grip,
+            (110, 419)
+        ));
+        assert!(!in_grip(
+            Layout::Vertical,
+            origin,
+            vertical,
+            grip,
+            (110, 399)
+        ));
+        assert!(!in_grip(
+            Layout::Vertical,
+            origin,
+            vertical,
+            grip,
+            (110, 420)
+        ));
+        assert!(!in_grip(
+            Layout::Vertical,
+            origin,
+            vertical,
+            grip,
+            (128, 410)
+        ));
+    }
+
+    #[test]
+    fn clamp_keeps_the_widget_inside_the_work_area() {
+        // 1920x1080 with a 40 px taskbar at the bottom.
+        let area = (0, 0, 1920, 1040);
+
+        // Already inside: untouched.
+        assert_eq!(clamp_rect_into(area, (100, 200), (220, 28)), (100, 200));
+        // Flush against each far edge is still inside.
+        assert_eq!(clamp_rect_into(area, (1700, 1012), (220, 28)), (1700, 1012));
+
+        // The reported live case: vertical at scale 1.25 is 35x275, and a
+        // top-left of (1861, 986) would end at y = 1261, well past the work
+        // area; it gets pushed up (and left) just enough to fit.
+        assert_eq!(clamp_rect_into(area, (1861, 986), (35, 275)), (1861, 765));
+        assert_eq!(clamp_rect_into(area, (1900, 986), (35, 275)), (1885, 765));
+
+        // Negative overshoot is clamped to the origin, no margin.
+        assert_eq!(clamp_rect_into(area, (-50, -80), (220, 28)), (0, 0));
+
+        // A window larger than the work area aligns to the top-left corner
+        // instead of being pushed off the opposite edge.
+        assert_eq!(clamp_rect_into(area, (500, 500), (2200, 1200)), (0, 0));
+        assert_eq!(clamp_rect_into(area, (500, 500), (220, 1040)), (500, 0));
+
+        // A secondary monitor's work area does not start at the origin.
+        let right = (1920, 100, 1280, 900);
+        assert_eq!(clamp_rect_into(right, (0, 0), (220, 28)), (1920, 100));
+        // Past the right edge: pulled back to 1920 + 1280 - 35.
+        assert_eq!(clamp_rect_into(right, (3300, 200), (35, 275)), (3165, 200));
+        assert_eq!(clamp_rect_into(right, (3100, 950), (35, 275)), (3100, 725));
+    }
+
+    #[test]
+    fn csv_quoting_and_local_iso() {
+        assert_eq!(csv_field("drink"), "drink");
+        assert_eq!(csv_field("a,b"), "\"a,b\"");
+        assert_eq!(csv_field("say \"hi\""), "\"say \"\"hi\"\"\"");
+        assert_eq!(csv_field("two\nlines"), "\"two\nlines\"");
+
+        // ISO 8601 with an explicit offset, e.g. 2026-09-02T13:45:00+03:00.
+        let iso = iso_local(1_800_000_000_000);
+        assert_eq!(iso.len(), 25);
+        assert_eq!(&iso[4..5], "-");
+        assert_eq!(&iso[10..11], "T");
+        assert!(iso[19..].starts_with('+') || iso[19..].starts_with('-'));
+    }
 }

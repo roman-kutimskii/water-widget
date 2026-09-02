@@ -67,6 +67,47 @@
           <label for="show-count">Show today's count</label>
           <input type="checkbox" id="show-count" />
         </div>
+
+        <div class="row">
+          <label for="layout-select">Layout</label>
+          <div class="control">
+            <select id="layout-select">
+              <option value="horizontal">Horizontal</option>
+              <option value="vertical">Vertical</option>
+              <option value="compact">Compact</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="row">
+          <label for="scale-range">Size</label>
+          <div class="control">
+            <input type="range" id="scale-range" min="75" max="150" step="5" />
+            <span id="scale-value" class="unit">100%</span>
+          </div>
+        </div>
+
+        <div class="row">
+          <label for="color-preset-select">Color preset</label>
+          <div class="control">
+            <select id="color-preset-select">
+              <option value="default">Default</option>
+              <option value="colorblind">Colorblind-safe</option>
+              <option value="mono">Monochrome</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="row">
+          <label for="reduced-motion-select">Reduced motion</label>
+          <div class="control">
+            <select id="reduced-motion-select">
+              <option value="system">System</option>
+              <option value="on">On</option>
+              <option value="off">Off</option>
+            </select>
+          </div>
+        </div>
       </section>
 
       <section class="group">
@@ -135,6 +176,39 @@
             <input type="range" id="sound-volume" min="0" max="100" step="1" />
             <span id="sound-volume-value" class="unit">50%</span>
             <button type="button" id="test-sound-btn">Test</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="group">
+        <h2>Stats</h2>
+
+        <div class="row">
+          <div id="stats-summary" class="stats-summary">Streak 0 days · Best 0 · Total 0 drinks</div>
+        </div>
+
+        <div class="row">
+          <div id="stats-chart" class="stats-chart-wrap"></div>
+        </div>
+      </section>
+
+      <section class="group">
+        <h2>Data</h2>
+
+        <div class="row">
+          <div class="control">
+            <button type="button" id="export-csv-btn">Export CSV</button>
+            <button type="button" id="open-data-dir-btn">Open data folder</button>
+          </div>
+        </div>
+
+        <div class="row">
+          <div id="data-status" class="hint"></div>
+        </div>
+
+        <div class="row">
+          <div class="control">
+            <button type="button" id="reset-all-btn" class="danger">Reset all</button>
           </div>
         </div>
       </section>

@@ -2,7 +2,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { playDropSound } from './sound';
-import type { Settings } from './types';
+import { renderStatsSvg } from './chart';
+import type { Settings, Stats, Tick } from './types';
 
 // --- Timing ---
 const intervalRange = document.getElementById('interval-range') as HTMLInputElement;
@@ -18,6 +19,11 @@ const opacityRange = document.getElementById('opacity-range') as HTMLInputElemen
 const opacityValue = document.getElementById('opacity-value') as HTMLSpanElement;
 const showTextCheckbox = document.getElementById('show-text') as HTMLInputElement;
 const showCountCheckbox = document.getElementById('show-count') as HTMLInputElement;
+const layoutSelect = document.getElementById('layout-select') as HTMLSelectElement;
+const scaleRange = document.getElementById('scale-range') as HTMLInputElement;
+const scaleValue = document.getElementById('scale-value') as HTMLSpanElement;
+const colorPresetSelect = document.getElementById('color-preset-select') as HTMLSelectElement;
+const reducedMotionSelect = document.getElementById('reduced-motion-select') as HTMLSelectElement;
 
 // --- Behavior ---
 const alwaysOnTop = document.getElementById('always-on-top') as HTMLInputElement;
@@ -34,6 +40,16 @@ const soundEnabled = document.getElementById('sound-enabled') as HTMLInputElemen
 const soundVolume = document.getElementById('sound-volume') as HTMLInputElement;
 const soundVolumeValue = document.getElementById('sound-volume-value') as HTMLSpanElement;
 const testSoundBtn = document.getElementById('test-sound-btn') as HTMLButtonElement;
+
+// --- Stats ---
+const statsSummary = document.getElementById('stats-summary') as HTMLDivElement;
+const statsChart = document.getElementById('stats-chart') as HTMLDivElement;
+
+// --- Data ---
+const exportCsvBtn = document.getElementById('export-csv-btn') as HTMLButtonElement;
+const openDataDirBtn = document.getElementById('open-data-dir-btn') as HTMLButtonElement;
+const resetAllBtn = document.getElementById('reset-all-btn') as HTMLButtonElement;
+const dataStatus = document.getElementById('data-status') as HTMLDivElement;
 
 // --- Footer ---
 const resetTodayBtn = document.getElementById('reset-today-btn') as HTMLButtonElement;
@@ -59,9 +75,14 @@ const DEFAULTS: Settings = {
   nudgeMax: 3,
   soundEnabled: false,
   soundVolume: 0.5,
+  layout: 'horizontal',
+  scale: 1.0,
+  colorPreset: 'default',
+  reducedMotion: 'system',
 };
 
 let current: Settings = { ...DEFAULTS };
+let lastTodayCount: number | null = null;
 
 let applying = false; // guard against feedback loop while we render incoming state
 
@@ -92,6 +113,12 @@ function renderFromSettings(s: Settings) {
   soundEnabled.checked = s.soundEnabled;
   soundVolume.value = String(Math.round(s.soundVolume * 100));
   soundVolumeValue.textContent = `${Math.round(s.soundVolume * 100)}%`;
+
+  layoutSelect.value = s.layout;
+  scaleRange.value = String(Math.round(s.scale * 100));
+  scaleValue.textContent = `${Math.round(s.scale * 100)}%`;
+  colorPresetSelect.value = s.colorPreset;
+  reducedMotionSelect.value = s.reducedMotion;
   applying = false;
 }
 
@@ -120,6 +147,10 @@ function readForm(): Settings {
       0,
       1
     ),
+    layout: (layoutSelect.value as Settings['layout']) || current.layout,
+    scale: clamp((Number(scaleRange.value) || current.scale * 100) / 100, 0.75, 1.5),
+    colorPreset: (colorPresetSelect.value as Settings['colorPreset']) || current.colorPreset,
+    reducedMotion: (reducedMotionSelect.value as Settings['reducedMotion']) || current.reducedMotion,
   };
 }
 
@@ -178,6 +209,13 @@ opacityRange.addEventListener('input', () => {
 });
 showTextCheckbox.addEventListener('input', scheduleApply);
 showCountCheckbox.addEventListener('input', scheduleApply);
+layoutSelect.addEventListener('change', scheduleApply);
+scaleRange.addEventListener('input', () => {
+  scaleValue.textContent = `${scaleRange.value}%`;
+  scheduleApply();
+});
+colorPresetSelect.addEventListener('change', scheduleApply);
+reducedMotionSelect.addEventListener('change', scheduleApply);
 
 // --- Behavior listeners ---
 alwaysOnTop.addEventListener('input', scheduleApply);
@@ -227,6 +265,44 @@ quitBtn.addEventListener('click', () => {
   invoke('quit').catch((err) => console.error('quit failed', err));
 });
 
+// --- Stats ---
+async function loadStats() {
+  try {
+    const stats = await invoke<Stats>('get_stats');
+    statsSummary.textContent = `Streak ${stats.streak} days · Best ${stats.bestStreak} · Total ${stats.totalDrinks} drinks`;
+    statsChart.innerHTML = renderStatsSvg(stats, current.dailyGoal);
+  } catch (err) {
+    console.error('get_stats failed', err);
+  }
+}
+
+// --- Data ---
+exportCsvBtn.addEventListener('click', async () => {
+  try {
+    const result = await invoke<{ path: string }>('export_csv');
+    dataStatus.textContent = `Exported to ${result.path}`;
+  } catch (err) {
+    console.error('export_csv failed', err);
+    dataStatus.textContent = 'Export failed.';
+  }
+});
+
+openDataDirBtn.addEventListener('click', () => {
+  invoke('open_data_dir').catch((err) => console.error('open_data_dir failed', err));
+});
+
+resetAllBtn.addEventListener('click', async () => {
+  if (!confirm('Delete all history and reset streaks?')) return;
+  try {
+    await invoke<Tick>('reset_all');
+    dataStatus.textContent = 'All history and streaks have been reset.';
+    await loadStats();
+  } catch (err) {
+    console.error('reset_all failed', err);
+    dataStatus.textContent = 'Reset failed.';
+  }
+});
+
 async function init() {
   try {
     const settings = await invoke<Settings>('get_settings');
@@ -236,12 +312,29 @@ async function init() {
     console.error('get_settings failed', err);
   }
 
+  await loadStats();
+
+  try {
+    const tick = await invoke<Tick>('get_tick');
+    lastTodayCount = tick.todayCount;
+  } catch (err) {
+    console.error('get_tick failed', err);
+  }
+
   await listen<Settings>('settings-changed', (event) => {
     // Reflect external changes (e.g. from another window) without
     // clobbering an in-flight edit.
     if (applying) return;
     current = event.payload;
     renderFromSettings(current);
+  });
+
+  await listen<Tick>('tick', (event) => {
+    const tick = event.payload;
+    if (lastTodayCount === null || tick.todayCount !== lastTodayCount) {
+      lastTodayCount = tick.todayCount;
+      void loadStats();
+    }
   });
 }
 

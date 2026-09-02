@@ -89,6 +89,8 @@ function rgbToHex(rgb: RGB): string {
   return `#${r}${g}${b}`;
 }
 
+export type ColorPreset = 'default' | 'colorblind' | 'mono';
+
 // Stops per CONTRACT.md, sorted descending by fill.
 const STOPS: Array<{ fill: number; hex: string }> = [
   { fill: 1.0, hex: '#3B82F6' },
@@ -98,7 +100,20 @@ const STOPS: Array<{ fill: number; hex: string }> = [
   { fill: 0.0, hex: '#EF4444' },
 ];
 
+// Colorblind-safe stops per v0.3 CONTRACT.md.
+const COLORBLIND_STOPS: Array<{ fill: number; hex: string }> = [
+  { fill: 1.0, hex: '#3B82F6' },
+  { fill: 0.5, hex: '#8B5CF6' },
+  { fill: 0.0, hex: '#D946EF' },
+];
+
+const MONO_HEX = '#9CA3AF';
+
 const STOP_LCH = STOPS.map((s) => ({ fill: s.fill, lch: rgbToOklch(hexToRgb(s.hex)) }));
+const COLORBLIND_STOP_LCH = COLORBLIND_STOPS.map((s) => ({
+  fill: s.fill,
+  lch: rgbToOklch(hexToRgb(s.hex)),
+}));
 
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
@@ -113,14 +128,16 @@ function lerpHue(a: number, b: number, t: number): number {
   return h;
 }
 
-/** Returns a CSS hex color for a given fill (0..1), interpolated in OKLCH between the CONTRACT.md stops. */
-export function fillColor(fill: number): string {
+function interpolateStops(
+  stops: Array<{ fill: number; lch: OKLCH }>,
+  fill: number
+): string {
   const f = Math.max(0, Math.min(1, fill));
 
-  // Find bracketing stops (STOP_LCH is sorted descending by fill).
-  for (let i = 0; i < STOP_LCH.length - 1; i++) {
-    const upper = STOP_LCH[i];
-    const lower = STOP_LCH[i + 1];
+  // Find bracketing stops (sorted descending by fill).
+  for (let i = 0; i < stops.length - 1; i++) {
+    const upper = stops[i];
+    const lower = stops[i + 1];
     if (f <= upper.fill && f >= lower.fill) {
       const span = upper.fill - lower.fill;
       const t = span === 0 ? 0 : (upper.fill - f) / span; // 0 at upper, 1 at lower
@@ -131,7 +148,21 @@ export function fillColor(fill: number): string {
     }
   }
   // Fallback (shouldn't happen given stops span 0..1).
-  return STOPS[STOPS.length - 1].hex;
+  return rgbToHex(oklchToRgb(stops[stops.length - 1].lch));
+}
+
+/** Returns a CSS hex color for a given fill (0..1), interpolated in OKLCH between the stops of the given preset. */
+export function fillColor(fill: number, preset: ColorPreset = 'default'): string {
+  if (preset === 'mono') return MONO_HEX;
+  if (preset === 'colorblind') return interpolateStops(COLORBLIND_STOP_LCH, fill);
+  return interpolateStops(STOP_LCH, fill);
+}
+
+/** Returns the overdue pulse color for the given preset. */
+export function overdueColor(preset: ColorPreset = 'default'): string {
+  if (preset === 'mono') return MONO_HEX;
+  if (preset === 'colorblind') return '#D946EF';
+  return '#EF4444';
 }
 
 // WCAG relative luminance from sRGB hex.

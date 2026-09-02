@@ -13,6 +13,8 @@ export interface Tick {
   quiet: boolean;
   snoozeMs: number;
   pausedSince: number | null;
+  // v0.3
+  streak: number;
 }
 
 export interface Nudge {
@@ -44,4 +46,24 @@ export interface Settings {
   nudgeMax: number; // 0..10, default 3
   soundEnabled: boolean; // default false
   soundVolume: number; // 0..1, default 0.5
+  // v0.3 Look
+  layout: 'horizontal' | 'vertical' | 'compact'; // default 'horizontal'
+  scale: number; // 0.75..1.5, default 1.0
+  colorPreset: 'default' | 'colorblind' | 'mono'; // default 'default'
+  reducedMotion: 'system' | 'on' | 'off'; // default 'system'
+}
+
+export interface DayStat {
+  dayKey: string; // "YYYY-MM-DD"
+  drinks: number;
+  avgGapMin: number | null;
+  longestOverdueMin: number;
+  goalMet: boolean;
+}
+
+export interface Stats {
+  days: DayStat[]; // last 14 days, oldest first
+  streak: number;
+  bestStreak: number;
+  totalDrinks: number;
 }

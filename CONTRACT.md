@@ -179,3 +179,83 @@ Title "Tide", body "Time for water" (overdue) / "Welcome back — drink now?" (w
 | clickThrough | 20 px grip zone with ⋮⋮ glyph at right edge; hover buttons disabled |
 
 Right-click still opens Settings (no custom context menu in v0.2).
+
+---
+
+# v0.3 additions (2026-09-02)
+
+Everything above stays valid. New Settings fields have defaults so old files load.
+
+## Settings (extended)
+
+```ts
+interface Settings {
+  // ...v0.2 fields unchanged...
+  // Look
+  layout: 'horizontal' | 'vertical' | 'compact';  // default 'horizontal'
+  scale: number;             // 0.75..1.5, default 1.0 — multiplies the window size
+  colorPreset: 'default' | 'colorblind' | 'mono';  // default 'default'
+  reducedMotion: 'system' | 'on' | 'off';          // default 'system'
+}
+```
+
+Window size is owned by Rust and applied on startup and whenever layout/scale change:
+
+| layout     | logical size (before scale) | notes |
+|------------|-----------------------------|-------|
+| horizontal | 220 × 28                    | as today |
+| vertical   | 28 × 220                    | fill anchored at the bottom, drains top-down like a glass |
+| compact    | 220 × 28                    | window keeps full height; UI draws a 6 px hairline at the bottom edge and expands to the full pill while hovered (+1.5 s after leave) |
+
+Top-left position is preserved when the size changes. The click-through grip is the rightmost 20 px (horizontal/compact) or the bottom 20 px (vertical).
+
+## Color presets (UI only)
+
+| preset     | stops (fill 1.0 → 0.0) | overdue |
+|------------|------------------------|---------|
+| default    | as MVP table            | `#EF4444` pulse |
+| colorblind | `#3B82F6` → `#8B5CF6` (0.5) → `#D946EF` (0.0) | `#D946EF` pulse (hue moves blue→purple→magenta, which stays distinguishable under red-green deficiency; luminance is not monotonic across the whole range, only within each segment) |
+| mono       | `#9CA3AF` flat; urgent zone adds a diagonal hatch (repeating-linear-gradient 45°, 4 px) | hatch + pulse |
+
+## Reduced motion (UI only)
+
+`system` → honour `prefers-reduced-motion`; `on` → no pulse/wobble/splash/expand animations; `off` → always animate. Implement as a class on `<html>` (`rm-on` / `rm-off`) so CSS can override the media query.
+
+## Streak and stats
+
+```ts
+interface Tick { /* ...*/ streak: number; }   // consecutive days where drinks >= dailyGoal (today excluded until it rolls over)
+
+interface DayStat {
+  dayKey: string;        // "YYYY-MM-DD" (04:00 rollover)
+  drinks: number;
+  avgGapMin: number | null;      // mean minutes between consecutive drinks that day; null if < 2 drinks
+  longestOverdueMin: number;     // max(0, gap − interval) over the day's gaps, using the current interval
+  goalMet: boolean;
+}
+interface Stats {
+  days: DayStat[];       // last 14 days, oldest first, every day present (zeros if none)
+  streak: number;
+  bestStreak: number;
+  totalDrinks: number;
+}
+```
+
+- Streak is stored in `state.json` (`streak`, `bestStreak`) and updated at day rollover: `todayCount >= dailyGoal` → `streak += 1`, else `streak = 0`; `bestStreak = max`. On first upgrade to v0.3 (fields missing) Rust rebuilds both from history.jsonl.
+- `get_stats` command → `Stats`, computed from history.jsonl (drink events only) at call time. Cheap enough (file is small).
+- Settings page gets a **Stats** group: streak / best / total, and a 14-day bar chart (inline SVG, no chart library, bar = drinks, a thin line at dailyGoal, bars ≥ goal in the fresh color, others grey). Refreshes on open and on every `tick` where `todayCount` changed.
+
+## Data commands
+
+| Command         | Args | Returns              | Notes |
+|-----------------|------|----------------------|-------|
+| `get_stats`     | –    | `Stats`              | |
+| `export_csv`    | –    | `{ path: string }`   | Writes `%APPDATA%/dev.kutimskii.tide/export/tide-history-YYYYMMDD-HHMMSS.csv` with header `ts_iso,type,source,minutes` and reveals it in Explorer (`explorer /select,<path>`). |
+| `open_data_dir` | –    | `void`               | Opens the data folder in Explorer. |
+| `reset_all`     | –    | `Tick`               | Deletes history, resets state (count, streak, timer full), keeps settings. UI must confirm first (native `confirm()` is fine). |
+
+Settings page gets a **Data** group: Export CSV, Open data folder, Reset all (danger). Footer keeps Reset today + Quit.
+
+## History (extended)
+
+Unchanged shape; `reset_all` appends `{type:'reset', source:'ui'}` after truncation so the file is never empty.

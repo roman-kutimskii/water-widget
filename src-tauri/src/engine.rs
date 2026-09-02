@@ -56,6 +56,8 @@ pub struct Tick {
     pub quiet: bool,
     pub snooze_ms: i64,
     pub paused_since: Option<i64>,
+    /// Consecutive completed days that met `dailyGoal` (v0.3).
+    pub streak: u32,
 }
 
 /// The mutable timing state the tick is computed from.
@@ -184,6 +186,7 @@ pub fn compute_tick_full(
     interval_ms: i64,
     today_count: u32,
     quiet: bool,
+    streak: u32,
 ) -> Tick {
     let interval = interval_ms.max(1);
     let effective = timer.effective_ms(now_ms);
@@ -202,6 +205,7 @@ pub fn compute_tick_full(
         quiet,
         snooze_ms: timer.snooze_ms,
         paused_since: timer.paused_since,
+        streak,
     }
 }
 
@@ -213,7 +217,7 @@ pub fn compute_tick(now_ms: i64, last_drink_ts: i64, interval_ms: i64, today_cou
         last_drink_ts,
         ..TimerState::default()
     };
-    compute_tick_full(now_ms, &timer, interval_ms, today_count, false)
+    compute_tick_full(now_ms, &timer, interval_ms, today_count, false, 0)
 }
 
 /// Zone thresholds per CONTRACT.md: fresh >= 0.6, fading >= 0.3, urgent > 0, overdue = 0.
@@ -560,7 +564,7 @@ mod tests {
         // 30 min in, 15 min left.
         let now = NOW + 30 * MIN;
         assert_eq!(timer.snooze(10), 10);
-        let t = compute_tick_full(now, &timer, INTERVAL, 0, false);
+        let t = compute_tick_full(now, &timer, INTERVAL, 0, false, 0);
         assert_eq!(t.last_drink_ts, NOW);
         assert_eq!(t.snooze_ms, 10 * MIN);
         assert_eq!(t.remaining_ms, 25 * MIN);
@@ -587,7 +591,7 @@ mod tests {
         assert!(!timer.set_paused(true, NOW + 11 * MIN));
 
         // While paused the elapsed time is frozen at 10 min.
-        let t = compute_tick_full(NOW + 40 * MIN, &timer, INTERVAL, 0, false);
+        let t = compute_tick_full(NOW + 40 * MIN, &timer, INTERVAL, 0, false, 0);
         assert_eq!(t.remaining_ms, 35 * MIN);
         assert_eq!(t.mode, Mode::Paused);
         assert_eq!(t.paused_since, Some(NOW + 10 * MIN));
@@ -596,7 +600,7 @@ mod tests {
         assert!(timer.set_paused(false, NOW + 40 * MIN));
         assert_eq!(timer.paused_accum_ms, 30 * MIN);
         assert!(!timer.set_paused(false, NOW + 41 * MIN));
-        let t = compute_tick_full(NOW + 45 * MIN, &timer, INTERVAL, 0, false);
+        let t = compute_tick_full(NOW + 45 * MIN, &timer, INTERVAL, 0, false, 0);
         assert_eq!(t.mode, Mode::Active);
         assert_eq!(t.remaining_ms, 30 * MIN);
     }
@@ -623,8 +627,8 @@ mod tests {
         // Go to sleep 30 min in; the bar freezes.
         assert!(timer.set_sleeping(true, NOW + 30 * MIN));
         assert_eq!(timer.mode(), Mode::Sleeping);
-        let frozen = compute_tick_full(NOW + 30 * MIN, &timer, INTERVAL, 0, false);
-        let later = compute_tick_full(NOW + 8 * 60 * MIN, &timer, INTERVAL, 0, false);
+        let frozen = compute_tick_full(NOW + 30 * MIN, &timer, INTERVAL, 0, false, 0);
+        let later = compute_tick_full(NOW + 8 * 60 * MIN, &timer, INTERVAL, 0, false, 0);
         assert_eq!(frozen.remaining_ms, later.remaining_ms);
         assert_eq!(later.mode, Mode::Sleeping);
 
@@ -634,7 +638,7 @@ mod tests {
         assert_eq!(timer.last_drink_ts, wake);
         assert_eq!(timer.snooze_ms, 0);
         assert_eq!(timer.paused_accum_ms, 0);
-        let t = compute_tick_full(wake, &timer, INTERVAL, 7, false);
+        let t = compute_tick_full(wake, &timer, INTERVAL, 7, false, 0);
         assert_eq!(t.fill, 1.0);
         assert_eq!(t.today_count, 7);
         assert_eq!(t.mode, Mode::Active);
@@ -800,7 +804,7 @@ mod tests {
             AwayOutcome::ResetSession
         );
         timer.reset_session(back);
-        let t = compute_tick_full(back, &timer, INTERVAL, 2, false);
+        let t = compute_tick_full(back, &timer, INTERVAL, 2, false, 0);
         assert_eq!(t.fill, 1.0);
         assert_eq!(t.snooze_ms, 0);
         assert_eq!(t.today_count, 2);
@@ -809,7 +813,16 @@ mod tests {
     #[test]
     fn quiet_flag_rides_on_the_tick() {
         let timer = TimerState::new(NOW);
-        let t = compute_tick_full(NOW, &timer, INTERVAL, 0, true);
+        let t = compute_tick_full(NOW, &timer, INTERVAL, 0, true, 0);
         assert!(t.quiet);
+    }
+
+    #[test]
+    fn streak_rides_on_the_tick() {
+        let timer = TimerState::new(NOW);
+        let t = compute_tick_full(NOW, &timer, INTERVAL, 0, false, 6);
+        assert_eq!(t.streak, 6);
+        // The MVP helper reports no streak.
+        assert_eq!(compute_tick(NOW, NOW, INTERVAL, 0).streak, 0);
     }
 }

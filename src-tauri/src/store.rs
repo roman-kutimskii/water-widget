@@ -7,10 +7,12 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 pub const SETTINGS_VERSION: u32 = 1;
-pub const STATE_VERSION: u32 = 1;
+/// Bumped to 2 in v0.3: `streak` / `bestStreak` were added and a version-1 file
+/// makes the app rebuild both from `history.jsonl` once.
+pub const STATE_VERSION: u32 = 2;
 
 pub const INTERVAL_MIN_MIN: u32 = 10;
 pub const INTERVAL_MIN_MAX: u32 = 180;
@@ -22,10 +24,96 @@ pub const NUDGE_EVERY_MIN_MIN: u32 = 1;
 pub const NUDGE_EVERY_MIN_MAX: u32 = 60;
 pub const NUDGE_MAX_MAX: u32 = 10;
 pub const DEFAULT_HOTKEY: &str = "Ctrl+Alt+W";
+pub const SCALE_MIN: f64 = 0.75;
+pub const SCALE_MAX: f64 = 1.5;
 
 const SETTINGS_FILE: &str = "settings.json";
 const STATE_FILE: &str = "state.json";
 const HISTORY_FILE: &str = "history.jsonl";
+
+/// A settings enum that survives an unknown value on disk by falling back to
+/// its default instead of failing the whole file.
+trait Labeled: Sized + Default {
+    fn from_label(label: &str) -> Option<Self>;
+}
+
+/// `#[serde(other)]` is not available for plain unit enums, so unknown strings
+/// (and non-strings) are mapped to the default here.
+fn de_labeled<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Labeled,
+{
+    let raw = serde_json::Value::deserialize(deserializer)?;
+    Ok(raw.as_str().and_then(T::from_label).unwrap_or_else(|| {
+        log::warn!("unknown settings value {raw}; using the default");
+        T::default()
+    }))
+}
+
+/// Widget shape. Rust owns the window size that goes with each (see
+/// `widget_size` in `lib.rs`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Layout {
+    #[default]
+    Horizontal,
+    Vertical,
+    Compact,
+}
+
+impl Labeled for Layout {
+    fn from_label(label: &str) -> Option<Self> {
+        match label {
+            "horizontal" => Some(Self::Horizontal),
+            "vertical" => Some(Self::Vertical),
+            "compact" => Some(Self::Compact),
+            _ => None,
+        }
+    }
+}
+
+/// Palette choice; interpreted by the UI only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ColorPreset {
+    #[default]
+    Default,
+    Colorblind,
+    Mono,
+}
+
+impl Labeled for ColorPreset {
+    fn from_label(label: &str) -> Option<Self> {
+        match label {
+            "default" => Some(Self::Default),
+            "colorblind" => Some(Self::Colorblind),
+            "mono" => Some(Self::Mono),
+            _ => None,
+        }
+    }
+}
+
+/// Animation policy; interpreted by the UI only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReducedMotion {
+    #[default]
+    System,
+    On,
+    Off,
+}
+
+impl Labeled for ReducedMotion {
+    fn from_label(label: &str) -> Option<Self> {
+        match label {
+            "system" => Some(Self::System),
+            "on" => Some(Self::On),
+            "off" => Some(Self::Off),
+            _ => None,
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -76,6 +164,16 @@ pub struct Settings {
     pub sound_enabled: bool,
     #[serde(default = "default_sound_volume")]
     pub sound_volume: f64,
+
+    // --- Look (v0.3)
+    #[serde(default, deserialize_with = "de_labeled")]
+    pub layout: Layout,
+    #[serde(default = "default_scale")]
+    pub scale: f64,
+    #[serde(default, deserialize_with = "de_labeled")]
+    pub color_preset: ColorPreset,
+    #[serde(default, deserialize_with = "de_labeled")]
+    pub reduced_motion: ReducedMotion,
 }
 
 fn default_version() -> u32 {
@@ -117,6 +215,9 @@ fn default_nudge_max() -> u32 {
 fn default_sound_volume() -> f64 {
     0.5
 }
+fn default_scale() -> f64 {
+    1.0
+}
 
 impl Default for Settings {
     fn default() -> Self {
@@ -141,6 +242,10 @@ impl Default for Settings {
             nudge_max: default_nudge_max(),
             sound_enabled: false,
             sound_volume: default_sound_volume(),
+            layout: Layout::default(),
+            scale: default_scale(),
+            color_preset: ColorPreset::default(),
+            reduced_motion: ReducedMotion::default(),
         }
     }
 }
@@ -174,6 +279,7 @@ impl Settings {
             .clamp(NUDGE_EVERY_MIN_MIN, NUDGE_EVERY_MIN_MAX);
         self.nudge_max = self.nudge_max.min(NUDGE_MAX_MAX);
         self.sound_volume = clamp_f64(self.sound_volume, 0.0, 1.0, default_sound_volume());
+        self.scale = clamp_f64(self.scale, SCALE_MIN, SCALE_MAX, default_scale());
         self
     }
 
@@ -244,6 +350,13 @@ pub struct PersistedState {
     pub snooze_ms: i64,
     #[serde(default = "default_last_mode")]
     pub last_mode: String,
+    // --- v0.3. A file written before `STATE_VERSION` 2 has no streak data, so
+    // these default to 0 and `needs_streak_rebuild` asks for a rebuild from
+    // history.jsonl once.
+    #[serde(default)]
+    pub streak: u32,
+    #[serde(default)]
+    pub best_streak: u32,
 }
 
 fn default_state_version() -> u32 {
@@ -267,7 +380,15 @@ impl PersistedState {
             paused_since: None,
             snooze_ms: 0,
             last_mode: default_last_mode(),
+            streak: 0,
+            best_streak: 0,
         }
+    }
+
+    /// True for a state file written before v0.3: the streak fields were not
+    /// stored yet and have to be recovered from `history.jsonl`.
+    pub fn needs_streak_rebuild(&self) -> bool {
+        self.version < 2
     }
 }
 
@@ -389,6 +510,42 @@ impl Store {
         writeln!(file, "{line}")?;
         file.flush()
     }
+
+    /// Every readable line of `history.jsonl`, oldest first. A missing file is
+    /// an empty history; an unparseable line is skipped rather than fatal.
+    pub fn load_history(&self) -> Vec<HistoryEntry> {
+        let raw = match fs::read_to_string(self.history_path()) {
+            Ok(raw) => raw,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+            Err(err) => {
+                log::warn!("history.jsonl unreadable ({err}); treating it as empty");
+                return Vec::new();
+            }
+        };
+        raw.lines()
+            .filter(|line| !line.trim().is_empty())
+            .filter_map(|line| match serde_json::from_str::<HistoryEntry>(line) {
+                Ok(entry) => Some(entry),
+                Err(err) => {
+                    log::warn!("skipping malformed history line ({err})");
+                    None
+                }
+            })
+            .collect()
+    }
+
+    /// Drops every history line. `reset_all` appends a `reset` entry right
+    /// after so the file is never left empty.
+    pub fn truncate_history(&self) -> std::io::Result<()> {
+        fs::write(self.history_path(), b"")
+    }
+
+    /// `<data dir>/export`, created on demand.
+    pub fn export_dir(&self) -> std::io::Result<PathBuf> {
+        let dir = self.dir.join("export");
+        fs::create_dir_all(&dir)?;
+        Ok(dir)
+    }
 }
 
 fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> std::io::Result<Option<T>> {
@@ -460,6 +617,84 @@ mod tests {
         assert_eq!(s.nudge_max, 3);
         assert!(!s.sound_enabled);
         assert!((s.sound_volume - 0.5).abs() < 1e-9);
+
+        assert_eq!(s.layout, Layout::Horizontal);
+        assert!((s.scale - 1.0).abs() < 1e-9);
+        assert_eq!(s.color_preset, ColorPreset::Default);
+        assert_eq!(s.reduced_motion, ReducedMotion::System);
+    }
+
+    #[test]
+    fn scale_is_clamped_and_bad_values_fall_back() {
+        let s = Settings {
+            scale: 0.1,
+            ..Settings::default()
+        }
+        .clamped();
+        assert!((s.scale - SCALE_MIN).abs() < 1e-9);
+
+        let s = Settings {
+            scale: 9.0,
+            ..Settings::default()
+        }
+        .clamped();
+        assert!((s.scale - SCALE_MAX).abs() < 1e-9);
+
+        let s = Settings {
+            scale: f64::NAN,
+            ..Settings::default()
+        }
+        .clamped();
+        assert!((s.scale - 1.0).abs() < 1e-9);
+
+        // A value already inside the range survives untouched.
+        let s = Settings {
+            scale: 1.25,
+            ..Settings::default()
+        }
+        .clamped();
+        assert!((s.scale - 1.25).abs() < 1e-9);
+    }
+
+    #[test]
+    fn look_enums_round_trip_and_unknown_values_default() {
+        let store = temp_store("look-enums");
+        fs::write(
+            store.settings_path(),
+            br#"{"layout":"vertical","colorPreset":"mono","reducedMotion":"on","scale":1.4}"#,
+        )
+        .expect("write");
+        let s = store.load_settings();
+        assert_eq!(s.layout, Layout::Vertical);
+        assert_eq!(s.color_preset, ColorPreset::Mono);
+        assert_eq!(s.reduced_motion, ReducedMotion::On);
+        assert!((s.scale - 1.4).abs() < 1e-9);
+
+        // Unknown / wrongly-typed values fall back per field, not per file.
+        fs::write(
+            store.settings_path(),
+            br#"{"layout":"diagonal","colorPreset":42,"reducedMotion":null,"intervalMin":60}"#,
+        )
+        .expect("write");
+        let s = store.load_settings();
+        assert_eq!(s.layout, Layout::Horizontal);
+        assert_eq!(s.color_preset, ColorPreset::Default);
+        assert_eq!(s.reduced_motion, ReducedMotion::System);
+        assert_eq!(s.interval_min, 60);
+
+        // Names on the wire are the lowercase ones from the contract.
+        let json = serde_json::to_string(&Settings {
+            layout: Layout::Compact,
+            color_preset: ColorPreset::Colorblind,
+            reduced_motion: ReducedMotion::Off,
+            ..Settings::default()
+        })
+        .expect("serialize");
+        assert!(json.contains(r#""layout":"compact""#));
+        assert!(json.contains(r#""colorPreset":"colorblind""#));
+        assert!(json.contains(r#""reducedMotion":"off""#));
+
+        let _ = fs::remove_dir_all(store.dir());
     }
 
     #[test]
@@ -673,7 +908,61 @@ mod tests {
         assert_eq!(st.paused_since, None);
         assert_eq!(st.snooze_ms, 0);
         assert_eq!(st.last_mode, "active");
+        // No streak data in a v1 file: zeros, plus a request to rebuild.
+        assert_eq!(st.streak, 0);
+        assert_eq!(st.best_streak, 0);
+        assert!(st.needs_streak_rebuild());
 
+        let _ = fs::remove_dir_all(store.dir());
+    }
+
+    #[test]
+    fn v03_state_carries_streaks_and_needs_no_rebuild() {
+        let store = temp_store("streaks");
+        let state = PersistedState {
+            streak: 4,
+            best_streak: 11,
+            ..PersistedState::new(1_700_000_000_000, "2026-09-02".into())
+        };
+        assert!(!state.needs_streak_rebuild());
+        store.save_state(&state).expect("save");
+        let loaded = store.load_state().expect("state");
+        assert_eq!(loaded, state);
+        assert_eq!(loaded.version, STATE_VERSION);
+        assert!(!loaded.needs_streak_rebuild());
+        let _ = fs::remove_dir_all(store.dir());
+    }
+
+    #[test]
+    fn history_is_read_back_and_truncated() {
+        let store = temp_store("history-io");
+        assert!(store.load_history().is_empty());
+
+        for entry in [
+            HistoryEntry::drink(1, "click"),
+            HistoryEntry::snooze(2, 10, "tray"),
+        ] {
+            store.append_history(&entry).expect("append");
+        }
+        // A malformed line is skipped, not fatal.
+        {
+            let mut file = OpenOptions::new()
+                .append(true)
+                .open(store.history_path())
+                .expect("open");
+            writeln!(file, "not json").expect("write");
+        }
+        store
+            .append_history(&HistoryEntry::drink(3, "hotkey"))
+            .expect("append");
+
+        let entries = store.load_history();
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].ts, 1);
+        assert_eq!(entries[2].kind, "drink");
+
+        store.truncate_history().expect("truncate");
+        assert!(store.load_history().is_empty());
         let _ = fs::remove_dir_all(store.dir());
     }
 }
