@@ -8,36 +8,141 @@
   </head>
   <body>
     <form id="settings-form">
-      <div class="row">
-        <label for="interval-number">Interval</label>
-        <div class="control">
-          <input type="range" id="interval-range" min="10" max="180" step="1" />
-          <input type="number" id="interval-number" min="10" max="180" step="1" />
-          <span class="unit">min</span>
+      <section class="group">
+        <h2>Timing</h2>
+
+        <div class="row">
+          <label for="interval-number">Interval</label>
+          <div class="control">
+            <input type="range" id="interval-range" min="10" max="180" step="1" />
+            <input type="number" id="interval-number" min="10" max="180" step="1" />
+            <span class="unit">min</span>
+          </div>
         </div>
-      </div>
 
-      <div class="row">
-        <label for="opacity-range">Opacity</label>
-        <div class="control">
-          <input type="range" id="opacity-range" min="30" max="100" step="1" />
-          <span id="opacity-value" class="unit">90%</span>
+        <div class="row">
+          <label>Active hours</label>
+          <div class="control">
+            <input type="time" id="active-start" />
+            <span class="dash">–</span>
+            <input type="time" id="active-end" />
+          </div>
         </div>
-      </div>
 
-      <div class="row checkbox-row">
-        <label for="show-text">Show remaining time text</label>
-        <input type="checkbox" id="show-text" />
-      </div>
+        <div class="row">
+          <label>Quiet hours</label>
+          <div class="control">
+            <input type="time" id="quiet-start" />
+            <span class="dash">–</span>
+            <input type="time" id="quiet-end" />
+          </div>
+        </div>
 
-      <div class="row checkbox-row">
-        <label for="show-count">Show today's count</label>
-        <input type="checkbox" id="show-count" />
-      </div>
+        <div class="row">
+          <label for="daily-goal">Daily goal</label>
+          <div class="control">
+            <input type="number" id="daily-goal" min="1" max="30" step="1" />
+            <span class="unit">drinks</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="group">
+        <h2>Look</h2>
+
+        <div class="row">
+          <label for="opacity-range">Opacity</label>
+          <div class="control">
+            <input type="range" id="opacity-range" min="30" max="100" step="1" />
+            <span id="opacity-value" class="unit">90%</span>
+          </div>
+        </div>
+
+        <div class="row checkbox-row">
+          <label for="show-text">Show remaining time text</label>
+          <input type="checkbox" id="show-text" />
+        </div>
+
+        <div class="row checkbox-row">
+          <label for="show-count">Show today's count</label>
+          <input type="checkbox" id="show-count" />
+        </div>
+      </section>
+
+      <section class="group">
+        <h2>Behavior</h2>
+
+        <div class="row checkbox-row">
+          <label for="always-on-top">Always on top</label>
+          <input type="checkbox" id="always-on-top" />
+        </div>
+
+        <div class="row checkbox-row">
+          <label for="click-through">Click-through</label>
+          <input type="checkbox" id="click-through" />
+        </div>
+
+        <div class="row checkbox-row">
+          <label for="autostart">Start with Windows</label>
+          <input type="checkbox" id="autostart" />
+        </div>
+
+        <div class="row checkbox-row">
+          <label for="hotkey-enabled">Global hotkey enabled</label>
+          <input type="checkbox" id="hotkey-enabled" />
+        </div>
+
+        <div class="row">
+          <label for="hotkey-text">Hotkey</label>
+          <div class="control">
+            <input type="text" id="hotkey-text" placeholder="e.g. Ctrl+Alt+W" />
+          </div>
+          <span class="hint">e.g. Ctrl+Alt+W</span>
+        </div>
+      </section>
+
+      <section class="group">
+        <h2>Alerts</h2>
+
+        <div class="row checkbox-row">
+          <label for="toast-enabled">Toast notifications</label>
+          <input type="checkbox" id="toast-enabled" />
+        </div>
+
+        <div class="row">
+          <label for="nudge-every">Nudge every</label>
+          <div class="control">
+            <input type="number" id="nudge-every" min="1" max="60" step="1" />
+            <span class="unit">min</span>
+          </div>
+        </div>
+
+        <div class="row">
+          <label for="nudge-max">Max nudges</label>
+          <div class="control">
+            <input type="number" id="nudge-max" min="0" max="10" step="1" />
+          </div>
+        </div>
+
+        <div class="row checkbox-row">
+          <label for="sound-enabled">Sound</label>
+          <input type="checkbox" id="sound-enabled" />
+        </div>
+
+        <div class="row">
+          <label for="sound-volume">Volume</label>
+          <div class="control">
+            <input type="range" id="sound-volume" min="0" max="100" step="1" />
+            <span id="sound-volume-value" class="unit">50%</span>
+            <button type="button" id="test-sound-btn">Test</button>
+          </div>
+        </div>
+      </section>
 
       <div class="spacer"></div>
 
       <div class="row footer-row">
+        <button type="button" id="reset-today-btn">Reset today</button>
         <button type="button" id="quit-btn" class="danger">Quit Tide</button>
       </div>
     </form>

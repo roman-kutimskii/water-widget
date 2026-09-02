@@ -1,6 +1,6 @@
 # Tide — Desktop Water Reminder Widget
 
-**Status:** v0.2, decisions resolved · 2026-09-02
+**Status:** spec v0.2, decisions resolved · MVP and v0.2 roadmap items implemented 2026-09-02 (see §13; IPC details in CONTRACT.md)
 **Platform:** Windows 11 first (macOS/Linux later)
 
 ---

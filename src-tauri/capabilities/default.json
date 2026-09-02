@@ -18,6 +18,10 @@
     "core:window:allow-close",
     "core:window:allow-outer-position",
     "core:window:allow-scale-factor",
-    "core:window:allow-inner-size"
+    "core:window:allow-inner-size",
+    "core:window:allow-set-always-on-top",
+    "notification:default",
+    "global-shortcut:default",
+    "autostart:default"
   ]
 }

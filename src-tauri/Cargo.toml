@@ -16,11 +16,24 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-single-instance = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-global-shortcut = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 log = "0.4"
 env_logger = "0.11"
+
+# Win32 bits used by platform.rs: session-lock detection, Focus Assist /
+# full-screen ("quiet") detection, cursor position for the click-through grip.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_System_StationsAndDesktops",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+] }
 
 [profile.release]
 opt-level = "s"

@@ -110,3 +110,113 @@ body {
 .text.hidden {
   display: none;
 }
+
+/* --- v0.2 states --- */
+
+.pill.paused .fill,
+.pill.sleeping .fill {
+  background: #9ca3af !important;
+  animation: none !important;
+}
+
+.pill.quiet {
+  --quiet-mult: 0.4;
+}
+
+/* --- nudge wobble --- */
+
+.pill.wobble {
+  animation: wobble 0.3s ease-in-out 3;
+}
+
+@keyframes wobble {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-3px);
+  }
+  75% {
+    transform: translateX(3px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pill.wobble {
+    animation: none;
+  }
+}
+
+/* --- hover mini buttons --- */
+
+.hover-controls {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 4px;
+  opacity: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    to right,
+    transparent,
+    rgba(0, 0, 0, 0.35) 30%
+  );
+  transition: opacity 0.15s ease;
+}
+
+.pill:hover .hover-controls {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.pill.click-through .hover-controls {
+  display: none;
+}
+
+.mini-btn {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.22);
+  color: #ffffff;
+  font-size: 11px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.mini-btn:hover {
+  background: rgba(255, 255, 255, 0.4);
+}
+
+/* --- click-through grip --- */
+
+.grip {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 20px;
+  z-index: 2;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  letter-spacing: -2px;
+  color: rgba(255, 255, 255, 0.55);
+  pointer-events: none;
+}
+
+.pill.click-through .grip {
+  display: flex;
+}
