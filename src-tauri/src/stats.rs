@@ -52,13 +52,22 @@ pub fn rolled_over_streak(
 }
 
 /// Drinks per logical day (04:00 rollover), oldest first.
+/// Drink timestamps grouped by logical day. A `reset` entry ("Reset today")
+/// discards the drinks logged earlier that same day, so the chart and the
+/// streaks agree with the zeroed counter instead of resurrecting them.
 fn drinks_per_day(entries: &[HistoryEntry], local_offset_secs: i32) -> BTreeMap<String, Vec<i64>> {
     let mut per_day: BTreeMap<String, Vec<i64>> = BTreeMap::new();
-    for entry in entries.iter().filter(|e| e.kind == "drink") {
-        per_day
-            .entry(day_key(entry.ts, local_offset_secs))
-            .or_default()
-            .push(entry.ts);
+    for entry in entries {
+        match entry.kind.as_str() {
+            "drink" => per_day
+                .entry(day_key(entry.ts, local_offset_secs))
+                .or_default()
+                .push(entry.ts),
+            "reset" => {
+                per_day.remove(&day_key(entry.ts, local_offset_secs));
+            }
+            _ => {}
+        }
     }
     for timestamps in per_day.values_mut() {
         timestamps.sort_unstable();
@@ -252,6 +261,26 @@ mod tests {
             drink(ms_at_utc(2026, 8, 21, 4, 0)),
         ];
         assert_eq!(rebuild_streaks(&history, now, 2, 0), (0, 0));
+    }
+
+    #[test]
+    fn reset_today_drops_that_days_earlier_drinks() {
+        let mut history = day_of_drinks(2026, 8, 26, 8); // yesterday, untouched
+        history.extend(day_of_drinks(2026, 8, 27, 3));
+        history.push(HistoryEntry::reset(ms_at_utc(2026, 8, 27, 14, 0), "ui"));
+        history.push(drink(ms_at_utc(2026, 8, 27, 15, 0))); // after the reset: counts
+        let now = ms_at_utc(2026, 8, 27, 20, 0);
+        let stats = compute_stats(&history, now, INTERVAL, 8, 0);
+
+        let today = stats.days.last().expect("today");
+        assert_eq!(today.drinks, 1);
+        assert_eq!(stats.days[STATS_DAYS - 2].drinks, 8);
+        assert_eq!(stats.total_drinks, 9);
+        assert_eq!(stats.streak, 1);
+
+        // A reset with no drinks at all that day is a no-op.
+        let history = vec![HistoryEntry::reset(now, "ui")];
+        assert_eq!(compute_stats(&history, now, INTERVAL, 8, 0).total_drinks, 0);
     }
 
     #[test]
