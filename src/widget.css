@@ -1,0 +1,112 @@
+:root {
+  color-scheme: light dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 220px;
+  height: 28px;
+  overflow: hidden;
+  background: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  font-size: 12px;
+  cursor: default;
+}
+
+.pill {
+  position: relative;
+  width: 220px;
+  height: 28px;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(20, 20, 25, 0.75);
+  transition:
+    filter 0.15s ease,
+    opacity 0.2s ease;
+}
+
+@media (prefers-color-scheme: light) {
+  .pill {
+    background: rgba(255, 255, 255, 0.8);
+    border-color: rgba(0, 0, 0, 0.12);
+  }
+}
+
+.pill:hover {
+  filter: brightness(1.08);
+}
+
+.fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  background: #3b82f6;
+  transition:
+    width 1s linear,
+    background-color 1s linear;
+  will-change: width, background-color;
+}
+
+.fill.splash {
+  transition:
+    width 0.3s cubic-bezier(0.16, 1, 0.3, 1),
+    background-color 0.3s ease;
+}
+
+.pill.overdue .fill {
+  animation: overdue-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes overdue-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pill.overdue .fill {
+    animation: none;
+    opacity: 1;
+  }
+}
+
+.text {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  font-weight: 500;
+  white-space: nowrap;
+  color: #ffffff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
+
+@media (prefers-color-scheme: light) {
+  .text {
+    color: #111111;
+    text-shadow: 0 1px 1px rgba(255, 255, 255, 0.5);
+  }
+}
+
+.text.hidden {
+  display: none;
+}

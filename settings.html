@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tide Settings</title>
+    <link rel="stylesheet" href="/src/settings.css" />
+  </head>
+  <body>
+    <form id="settings-form">
+      <div class="row">
+        <label for="interval-number">Interval</label>
+        <div class="control">
+          <input type="range" id="interval-range" min="10" max="180" step="1" />
+          <input type="number" id="interval-number" min="10" max="180" step="1" />
+          <span class="unit">min</span>
+        </div>
+      </div>
+
+      <div class="row">
+        <label for="opacity-range">Opacity</label>
+        <div class="control">
+          <input type="range" id="opacity-range" min="30" max="100" step="1" />
+          <span id="opacity-value" class="unit">90%</span>
+        </div>
+      </div>
+
+      <div class="row checkbox-row">
+        <label for="show-text">Show remaining time text</label>
+        <input type="checkbox" id="show-text" />
+      </div>
+
+      <div class="row checkbox-row">
+        <label for="show-count">Show today's count</label>
+        <input type="checkbox" id="show-count" />
+      </div>
+
+      <div class="spacer"></div>
+
+      <div class="row footer-row">
+        <button type="button" id="quit-btn" class="danger">Quit Tide</button>
+      </div>
+    </form>
+    <script type="module" src="/src/settings.ts"></script>
+  </body>
+</html>
