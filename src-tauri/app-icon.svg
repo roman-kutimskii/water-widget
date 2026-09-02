@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1e2430"/>
+      <stop offset="1" stop-color="#0f131a"/>
+    </linearGradient>
+    <linearGradient id="water" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#60a5fa"/>
+      <stop offset="1" stop-color="#2563eb"/>
+    </linearGradient>
+    <clipPath id="drop">
+      <path d="M512 150 C512 150 260 430 260 610 A252 252 0 0 0 764 610 C764 430 512 150 512 150 Z"/>
+    </clipPath>
+  </defs>
+  <rect x="0" y="0" width="1024" height="1024" rx="224" fill="url(#bg)"/>
+  <rect x="24" y="24" width="976" height="976" rx="204" fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="8"/>
+  <!-- drop outline -->
+  <path d="M512 150 C512 150 260 430 260 610 A252 252 0 0 0 764 610 C764 430 512 150 512 150 Z"
+        fill="#ffffff" fill-opacity="0.10" stroke="#93c5fd" stroke-opacity="0.9" stroke-width="26" stroke-linejoin="round"/>
+  <!-- water level with wave -->
+  <g clip-path="url(#drop)">
+    <path fill="url(#water)"
+          d="M200 560 C300 520 360 600 460 570 C560 540 620 620 720 585 C780 565 820 590 860 575 L860 900 L200 900 Z"/>
+    <path fill="#ffffff" fill-opacity="0.18"
+          d="M200 600 C300 560 360 640 460 610 C560 580 620 660 720 625 C780 605 820 630 860 615 L860 640 C820 655 780 630 720 650 C620 685 560 605 460 635 C360 665 300 585 200 625 Z"/>
+  </g>
+  <!-- highlight -->
+  <ellipse cx="420" cy="690" rx="46" ry="70" fill="#ffffff" fill-opacity="0.35" transform="rotate(-25 420 690)"/>
+</svg>
