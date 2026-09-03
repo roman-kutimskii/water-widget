@@ -1,6 +1,6 @@
 [package]
 name = "tide"
-version = "0.1.0"
+version = "0.2.0"
 description = "Tide — desktop water reminder widget"
 authors = ["Roman Kutimskii"]
 edition = "2021"
