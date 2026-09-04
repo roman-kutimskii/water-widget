@@ -72,30 +72,38 @@ body {
     background-color 0.3s ease;
 }
 
-.pill.overdue .fill {
-  animation: overdue-pulse 1.5s ease-in-out infinite;
+/* Overdue: the fill is (near) empty, so pulse a full-pill overlay in the
+   current fill color instead of the fill itself. */
+.pill.overdue::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--fill-color, #ef4444);
+  opacity: 0;
+  pointer-events: none;
+  animation: overdue-pulse 1.2s ease-in-out infinite;
 }
 
 @keyframes overdue-pulse {
   0%,
   100% {
-    opacity: 1;
+    opacity: 0.15;
   }
   50% {
-    opacity: 0.6;
+    opacity: 0.8;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  html:not(.rm-off) .pill.overdue .fill {
+  html:not(.rm-off) .pill.overdue::before {
     animation: none;
-    opacity: 1;
+    opacity: 0.45;
   }
 }
 
-html.rm-on .pill.overdue .fill {
+html.rm-on .pill.overdue::before {
   animation: none;
-  opacity: 1;
+  opacity: 0.45;
 }
 
 .text {
@@ -314,6 +322,4 @@ html.preset-mono .pill.overdue .fill::after {
   pointer-events: none;
 }
 
-html.preset-mono .pill.overdue .fill {
-  animation: overdue-pulse 1.5s ease-in-out infinite;
-}
+

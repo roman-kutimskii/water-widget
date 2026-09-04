@@ -65,6 +65,7 @@ function render() {
       fillEl.style.width = `${tick.fill * 100}%`;
     }
     fillEl.style.backgroundColor = color;
+    pillEl.style.setProperty('--fill-color', color);
   }
 
   const baseOpacity = settings ? settings.opacity : 0.9;
